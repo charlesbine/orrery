@@ -6,6 +6,7 @@
 
 *Layout is topology, not astronomy. State is expressed only as light.*
 
+[![Live Demo](https://img.shields.io/badge/live%20demo-charlesbine.com%2Fdemos%2Forrery-e2c496.svg)](https://charlesbine.com/demos/orrery/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-38bdf8.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/runtime%20deps-0-10b981.svg)](package.json)
 [![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-94a3b8.svg)](package.json)
@@ -13,7 +14,7 @@
 
 <br>
 
-![Orrery wide orbital view of the solaris.lab demo homelab fleet](docs/media/hero-wide.png)
+![Orrery interactive star chart showing inner LAN hosts, interplanetary transfer ships, Jupiter and Europa, and Europa's 20-station Docker Compose HUD](docs/media/hero.png)
 
 </div>
 
@@ -21,7 +22,11 @@
 
 Not a dashboard. Launchers give you tiles to click; **Orrery is the map** — the
 view that shows what your infrastructure *is*, how trust boundaries separate it,
+how backups and gateways flow between hosts as interplanetary transfer ships,
 and what is alive right now.
+
+Explore the **[live interactive `solaris.lab` demo](https://charlesbine.com/demos/orrery/)**
+in your browser (or read the [project tour & 1080p flythrough](https://charlesbine.com/projects/orrery/)).
 
 It runs as zero-dependency static HTML/WebGL behind Caddy, backed by an optional
 **networkless, read-only, zero-Docker-socket** sidecar that discovers your
@@ -29,14 +34,48 @@ services from Compose, Traefik, Caddy, Homepage, and Tailscale configuration.
 
 ---
 
+## Why a Star Chart? (The Naming Philosophy)
+
+Orrery isn't a sci-fi skin slapped onto a homelab — it grew directly out of how
+I name my own machines. My rule is simple: **a name should earn its place by
+pointing at the job, and follow a geography of distance**:
+
+- **Close (LAN & core infra) → solar-system bodies.** Machines inside the house
+  are planets, moons, and minor bodies matched to their role: hot GPU/AI compute
+  closest to the sun (*Mercury*), bulk storage in the belt (*Ceres*), a
+  container host harboring services like an ice moon hiding a subsurface ocean
+  (*Europa*) orbiting its hypervisor (*Jupiter*), and small single-job appliances
+  named after asteroids or luminous sky phenomena.
+- **Boundary (skinny-ACL tailnet edge) → outer-system / Kuiper bodies.** Nodes
+  sitting on the boundary between inside and outside — like an isolated
+  agent-hosting VPS behind a tight tailnet ACL — live at the outer edge
+  (*Charon*, the ferryman between worlds).
+- **Far & less trusted (off-tailnet VPSes) → beyond the heliopause.** Anything
+  that lives outside the house and **off the tailnet** — public-facing VPSes or
+  untrusted edge boxes — sits **outside the heliopause** among the interstellar
+  stars (*Polaris*, the fixed beacon ships navigate to). You can read your trust
+  perimeter at a single glance.
+- **Machines carry the theme; services stay legible.** Off-the-shelf software
+  always keeps its real product name (`traefik`, `grafana`, `gatus`,
+  `vaultwarden`) — renaming infrastructure apps just creates debugging
+  confusion. Hosts get celestial names; the stations orbiting them stay
+  unmistakable.
+
+*(Orrery works with any hostnames you already use via `orrery import --tailscale`
+or Compose discovery — you don't need to adopt celestial hostnames to run it,
+though the map feels right at home if you do.)*
+
+---
+
 ## The Two Ideas It Rests On
 
 ### 1. Layout is topology, not astronomy
-Orbital radius encodes **trust distance** from your core LAN out to the
-heliopause and public internet. Real astronomical coordinates would collapse
-inner infrastructure and untrusted edge nodes together, so Orrery renders real
-procedural planets, moons, rings, asteroid belts, comets, and a real star
-catalogue over a **collision-solved topological layout**.
+Orbital radius encodes **trust distance** — from your core LAN planets out
+through tailnet boundary nodes, across the **heliopause**, and into interstellar
+space for less-trusted or off-tailnet VPSes. Real astronomical coordinates would
+collapse inner infrastructure and untrusted edge nodes together, so Orrery
+renders real procedural planets, moons, rings, asteroid belts, comets, and
+beyond-heliopause stars over a **collision-solved topological layout**.
 
 Every orbit (`a`, `e`) and the heliopause boundary are solved mathematically by
 [`dev/layout.js`](dev/layout.js) using confocal ellipse nesting and audited across
@@ -56,6 +95,17 @@ There is not a single green badge or traffic-light pill anywhere in the chart:
 ---
 
 ## Visual Tour
+
+### Interplanetary Transfer Ships — Backups, Gateways & Telemetry in Motion
+Cross-host traffic isn't hidden in static arrows — recurring flows travel across
+the system as color-coded **interplanetary transfer ships** arcing between their
+origin and destination hosts. Backups (`Restic`, `ZFS` replication, off-site
+mirrors), `MCP` gateway & tool-verdict traffic, `LLM` inference calls, CI
+runners, and telemetry streams each carry a muted orbital hue and fading trail,
+and every ship is clickable and searchable via `⌘K`. Define your own routes in
+`SHIPS` in [`src/fleet.js`](src/fleet.js).
+
+![Inner trust rings showing color-coded interplanetary transfer ships arcing between hosts](docs/media/transfer-ships.png)
 
 ### Procedural 3D Spacecraft Hulls — Impostors Far, Real Meshes Near
 Services are **stations**, not planets. At wide zoom they orbit their host in
