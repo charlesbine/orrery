@@ -1,0 +1,15 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    labels:
+      - "traefik.http.routers.grafana.rule=Host(`grafana.solaris.lab`)"
+
+  prometheus:
+    image: prom/prometheus:latest
+    labels:
+      - "traefik.http.routers.prometheus.rule=Host(`prom.solaris.lab`)"
+
+  loki:
+    image: grafana/loki:latest
+    labels:
+      - "orrery.enable=true"

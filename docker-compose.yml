@@ -1,0 +1,57 @@
+services:
+  orrery:
+    build:
+      context: .
+      target: web
+    image: orrery:local
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOME: /tmp
+      XDG_CONFIG_HOME: /tmp/caddy-config
+      XDG_DATA_HOME: /tmp/caddy-data
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Live generated roster from orrery-sync (falls back to built-in demo if empty).
+      - orrery-generated:/srv/generated:ro
+      # Optional: overlay a custom fleet.js or Caddyfile for private deployments:
+      # - ./fleet.private.js:/srv/fleet.js:ro
+      # - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+  orrery-sync:
+    build:
+      context: .
+      target: sync
+    image: orrery-sync:local
+    restart: unless-stopped
+    # Security-first design: zero network access, read-only rootfs, zero Docker socket.
+    # Mount only the specific non-secret YAML/JSON files Orrery needs to read.
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./orrery.config.json:/config/orrery.config.json:ro
+      - ./examples/demo:/config/examples/demo:ro
+      - orrery-generated:/generated:rw
+      # Example: mount your own non-secret Compose / Traefik / Gatus configs read-only:
+      # - /srv/homelab/compose.apps.yml:/config/compose.apps.yml:ro
+      # - /srv/homelab/traefik/services.yml:/config/traefik/services.yml:ro
+      # - /srv/homelab/gatus/config.yaml:/config/gatus/config.yaml:ro
+
+volumes:
+  orrery-generated:

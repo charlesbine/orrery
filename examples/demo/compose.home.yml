@@ -1,0 +1,23 @@
+services:
+  adguard-home:
+    image: adguard/adguardhome:latest
+    labels:
+      - "traefik.http.routers.adguard.rule=Host(`dns.solaris.lab`)"
+
+  paperless-ngx:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    labels:
+      - "traefik.http.routers.paperless.rule=Host(`docs.solaris.lab`)"
+
+  paperless-redis:
+    image: redis:7-alpine
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:latest
+    labels:
+      - "traefik.http.routers.mealie.rule=Host(`recipes.solaris.lab`)"
+
+  vaultwarden:
+    image: vaultwarden/server:latest
+    labels:
+      - "traefik.http.routers.vaultwarden.rule=Host(`vault.solaris.lab`)"

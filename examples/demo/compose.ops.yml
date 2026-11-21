@@ -1,0 +1,15 @@
+services:
+  gatus:
+    image: twinproduction/gatus:stable
+    labels:
+      - "traefik.http.routers.gatus.rule=Host(`status.solaris.lab`)"
+
+  orrery:
+    image: orrery:local
+    labels:
+      - "traefik.http.routers.orrery.rule=Host(`orrery.solaris.lab`)"
+
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    labels:
+      - "traefik.http.routers.homepage.rule=Host(`home.solaris.lab`)"

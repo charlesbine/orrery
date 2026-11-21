@@ -1,0 +1,32 @@
+http:
+  routers:
+    ollama:
+      rule: "Host(`ollama.solaris.lab`)"
+    open-webui:
+      rule: "Host(`chat.solaris.lab`)"
+    comfyui:
+      rule: "Host(`comfy.solaris.lab`)"
+    whisper:
+      rule: "Host(`whisper.solaris.lab`)"
+    forgejo:
+      rule: "Host(`git.solaris.lab`)"
+    immich:
+      rule: "Host(`photos.solaris.lab`)"
+    minio-web:
+      rule: "Host(`minio.solaris.lab`)"
+    minio-s3:
+      rule: "Host(`s3.solaris.lab`)"
+    restic:
+      rule: "Host(`restic.solaris.lab`)"
+    home-assistant:
+      rule: "Host(`ha.solaris.lab`)"
+    zigbee2mqtt:
+      rule: "Host(`zigbee.solaris.lab`)"
+    jellyfin:
+      rule: "Host(`watch.solaris.lab`)"
+    navidrome:
+      rule: "Host(`music.solaris.lab`)"
+    audiobookshelf:
+      rule: "Host(`books.solaris.lab`)"
+    opnsense:
+      rule: "Host(`fw.solaris.lab`)"

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Orrery — surface contact sheet</title>
+<style>
+  :root { --ice:#cfe3f2; --dim:#37465c; --mono: ui-monospace, Menlo, Consolas, monospace; }
+  html,body { margin:0; background:#05070d; color:var(--ice); font-family:var(--mono); }
+  h1 { font-size:.7rem; letter-spacing:.3em; text-transform:uppercase; font-weight:500;
+       margin:22px 26px 4px; }
+  p.sub { margin:0 26px 18px; font-size:.6rem; color:var(--dim); letter-spacing:.08em; }
+  #sheet { display:block; margin:0 26px 40px; }
+  .caps { position:absolute; inset:0; pointer-events:none; }
+  .cap { position:absolute; font-size:.56rem; letter-spacing:.12em;
+         text-transform:uppercase; color:var(--ice); text-shadow:0 0 6px #05070d; }
+  .cap i { display:block; font-style:normal; color:var(--dim); font-size:.5rem; }
+  #wrap { position:relative; }
+</style></head><body>
+<h1>Surface contact sheet</h1>
+<p class="sub">Every body rendered at once with the shipping shader. One capture per tuning pass.</p>
+<div id="wrap"><canvas id="sheet"></canvas><div class="caps" id="caps"></div></div>
+
+<script src="../src/fleet.js"></script>
+<script src="../src/shaders.js"></script>
+<script>
+(() => {
+  const KIND_ID = { star:0, gas:1, ice:2, rock:3, dark:4, reserved:5, station:6, craft:7 };
+  const ONLY = new URLSearchParams(location.search).get("only");
+  const cells = (ONLY === "stations" ? [] : FLEET.filter(b => !b.station && b.kind !== "reserved"))
+    .concat(FLEET.filter(b => b.kind === "reserved" && b.parent)
+              .map(b => Object.assign({}, b, { kind: "rock" })))
+    .concat(ONLY === "stations" ? FLEET.filter(b => b.kind === "craft") : [])
+    .concat(["relay","stack","sensor","hab","wing","radiator","ring","truss"]
+        .map(a => FLEET.find(b => b.station && b.arch === a))
+        .filter(Boolean))
+    .concat(FLEET.filter(b => b.kind === "reserved").slice(0, 2));
+
+  const COLS = 6, CELL = 250, PAD = 26;
+  const rows = Math.ceil(cells.length / COLS);
+  const c = document.getElementById("sheet");
+  const W = COLS * CELL, H = rows * CELL;
+  c.width = W * 2; c.height = H * 2;            // 2x for a crisp capture
+  c.style.width = W + "px"; c.style.height = H + "px";
+  document.getElementById("wrap").style.width = W + "px";
+
+  const gl = c.getContext("webgl", { alpha:false, antialias:true });
+  const sh = (t, src) => { const o = gl.createShader(t); gl.shaderSource(o, src);
+    gl.compileShader(o);
+    if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(o));
+    return o; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(pr); gl.useProgram(pr);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER,
+    new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+  const a = gl.getAttribLocation(pr, "a_quad");
+  gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
+  const U = {};
+  ["u_center","u_res","u_radius","u_light","u_tint","u_kind","u_spin","u_lit",
+   "u_seed","u_sel","u_ghost","u_style","u_atmo","u_detail","u_arch","u_craft","u_angle"]
+    .forEach(n => U[n] = gl.getUniformLocation(pr, n));
+
+  gl.viewport(0, 0, c.width, c.height);
+  gl.clearColor(0.02, 0.027, 0.051, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND);
+  gl.uniform2f(U.u_res, c.width, c.height);
+
+  const caps = document.getElementById("caps");
+  cells.forEach((b, i) => {
+    const cx = (i % COLS) * CELL + CELL / 2, cy = Math.floor(i / COLS) * CELL + CELL / 2;
+    gl.blendFunc(gl.SRC_ALPHA, b.kind === "star" ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+    gl.uniform2f(U.u_center, cx * 2, cy * 2);
+    gl.uniform1f(U.u_radius, CELL * 0.40 * 2);
+    gl.uniform2f(U.u_light, 0.80, -0.36);
+    gl.uniform3fv(U.u_tint, b.tint);
+    gl.uniform1f(U.u_kind, KIND_ID[b.kind]);
+    gl.uniform1f(U.u_spin, (b.seed ?? 0) * 0.37);
+    gl.uniform1f(U.u_lit, 1);
+    gl.uniform1f(U.u_seed, b.seed ?? 0);
+    gl.uniform1f(U.u_sel, 0);
+    gl.uniform1f(U.u_ghost, 1);
+    if (U.u_style)  gl.uniform1f(U.u_style,  SURFACE_ID[b.surface] ?? 0);
+    if (U.u_atmo)   gl.uniform1f(U.u_atmo,   b.atmo ?? 0);
+    if (U.u_detail) gl.uniform1f(U.u_detail, 1);
+    if (U.u_arch)   gl.uniform1f(U.u_arch, ARCH_ID[b.arch] ?? 0);
+    if (U.u_craft)  gl.uniform1f(U.u_craft, CRAFT_ID[b.craft] ?? 0);
+    if (U.u_angle)  gl.uniform1f(U.u_angle, 0.35);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    const d = document.createElement("div");
+    d.className = "cap";
+    d.style.left = ((i % COLS) * CELL + 8) + "px";
+    d.style.top = (Math.floor(i / COLS) * CELL + CELL - 26) + "px";
+    d.innerHTML = b.name + "<i>" + (b.craft || b.arch || (b.kind === "craft" ? "craft" : b.surface) || b.kind) + " · seed " + (b.seed ?? 0).toFixed(1) + "</i>";
+    caps.appendChild(d);
+  });
+  document.title = "contact sheet — " + cells.length + " bodies";
+})();
+</script></body></html>

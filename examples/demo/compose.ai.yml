@@ -1,0 +1,10 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    labels:
+      - "traefik.http.routers.litellm.rule=Host(`llm.solaris.lab`)"
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    labels:
+      - "traefik.http.routers.qdrant.rule=Host(`qdrant.solaris.lab`)"

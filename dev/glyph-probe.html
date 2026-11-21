@@ -1,0 +1,182 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>glyph probe — orrery</title>
+<!--
+  glyph-probe.html — look at the small glyphs, and assert nothing clips them.
+
+  Every other tool in dev/ runs headless, and none of them can tell you how a
+  thing LOOKS. That gap is how two chart-blanking regressions shipped. This one
+  needs a browser and a real GPU on purpose: it draws the station and craft
+  glyphs at the sizes they actually appear at, magnified enough to see, using
+  the shipped shader rather than a copy.
+
+  It also asserts the invariant that motivated it. A glyph's silhouette is an
+  SDF and its antialias band is 1.0/u_radius wide in uv units — at the 2.5px
+  station floor that is 0.4, which overruns a unit quad. The check renders each
+  glyph twice, once with the disc clip and once without, and fails if the clip
+  removes any coverage: if it does, the soft edge is being cut off square and
+  the glyph will crawl under sub-pixel motion.
+
+      python3 -m http.server 8000     # from the repo root
+      open http://localhost:8000/dev/glyph-probe.html
+-->
+<style>
+  body { background:#080b12; color:#c8d3e0; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+         margin:0; padding:28px 32px; }
+  h1 { font:600 12px/1 ui-monospace,monospace; letter-spacing:.22em; text-transform:uppercase;
+       color:#8fa3ba; margin:0 0 22px; }
+  #verdict { padding:10px 14px; border-left:2px solid; margin:0 0 26px; white-space:pre-wrap; }
+  .pass { border-color:#38bdf8; color:#9fd8f2; }
+  .fail { border-color:#f97362; color:#ffb3a8; }
+  table { border-collapse:collapse; }
+  th { font-weight:400; color:#7c8ea6; text-align:left; padding:0 14px 8px 0; font-size:11px;
+       letter-spacing:.12em; text-transform:uppercase; }
+  td { padding:0 14px 14px 0; vertical-align:top; }
+  td.name { color:#8fa3ba; padding-top:26px; }
+  canvas { image-rendering:pixelated; background:#0d1420; display:block; }
+  small { color:#6b7f96; display:block; margin-top:4px; }
+</style>
+<h1>Orrery · glyph probe</h1>
+<div id="verdict">running…</div>
+<div id="sheet"></div>
+<script src="../src/shaders.js"></script>
+<script>
+(() => {
+  const ARCH  = ['truss','relay','stack','sensor','hab','wing','radiator','ring'];
+  const CRAFT = ['tender','courier','derelict'];
+  /* 2.5 is the station floor at DPR 1, 5.0 the same floor at DPR 2, 14 a
+     station you have zoomed in on. */
+  const RADII = [2.5, 5, 14];
+  const SIZE  = 96;              // probe render target, in device pixels
+  const ZOOM  = 6;               // magnification for the contact sheet
+
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = SIZE;
+  const gl = cv.getContext('webgl', { antialias:false, preserveDrawingBuffer:true });
+  if (!gl) throw new Error('no webgl');
+
+  const compile = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const build = (vs, fs) => {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.bindAttribLocation(p, 0, 'a_quad');
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+      throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  };
+
+  /* The control program: same shader with the disc clip taken out entirely, so
+     any coverage the shipped one lacks is coverage the clip removed. */
+  const CLIP = 'if (rr > 1.0) discard;';
+  if (!FS.includes(CLIP)) throw new Error('disc clip not found — FS changed shape');
+  const shipped = build(VS, FS);
+  const noClip  = build(VS, FS.replace(CLIP, ''));
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  const px = new Uint8Array(SIZE * SIZE * 4);
+  const render = (prog, kind, arch, craft, radius) => {
+    gl.useProgram(prog);
+    const U = n => gl.getUniformLocation(prog, n);
+    gl.uniform2f(U('u_res'), SIZE, SIZE);
+    gl.uniform2f(U('u_center'), SIZE/2, SIZE/2);
+    gl.uniform1f(U('u_radius'), radius);
+    gl.uniform2f(U('u_light'), 0.7, -0.7);
+    gl.uniform3f(U('u_tint'), 0.72, 0.80, 0.92);
+    gl.uniform1f(U('u_kind'),  kind);
+    gl.uniform1f(U('u_arch'),  arch);
+    gl.uniform1f(U('u_craft'), craft);
+    gl.uniform1f(U('u_lit'), 1); gl.uniform1f(U('u_ghost'), 1);
+    gl.uniform1f(U('u_seed'), 41); gl.uniform1f(U('u_sel'), 0);
+    gl.uniform1f(U('u_spin'), 0); gl.uniform1f(U('u_style'), 0);
+    gl.uniform1f(U('u_atmo'), 0); gl.uniform1f(U('u_detail'), 0);
+    gl.uniform1f(U('u_angle'), 0.6);
+    gl.viewport(0, 0, SIZE, SIZE);
+    gl.disable(gl.BLEND);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.readPixels(0, 0, SIZE, SIZE, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    return px.slice();
+  };
+
+  const cases = ARCH.map((name, i) => ({ name, kind:6, arch:i, craft:0 }))
+    .concat(CRAFT.map((name, c) => ({ name:'craft · '+name, kind:7, arch:0, craft:c })));
+
+  // ── the assertion ────────────────────────────────────────────────────────
+  const failures = [];
+  for (const R of RADII) for (const cs of cases) {
+    const a = render(shipped, cs.kind, cs.arch, cs.craft, R);
+    const b = render(noClip,  cs.kind, cs.arch, cs.craft, R);
+    let lost = 0, kept = 0;
+    for (let i = 3; i < a.length; i += 4) { kept += a[i]; if (b[i] > a[i]) lost += b[i] - a[i]; }
+    if (lost > 0) failures.push(
+      `${cs.name} @ ${R}px — disc clip removes ${(100*lost/(kept+lost)).toFixed(1)}% of coverage`);
+  }
+  const v = document.getElementById('verdict');
+  v.className = failures.length ? 'fail' : 'pass';
+  v.textContent = failures.length
+    ? 'FAIL — the disc clip is cutting glyph silhouettes:\n  ' + failures.join('\n  ')
+    : `PASS — disc clip removes no glyph coverage (${cases.length} glyphs × ${RADII.length} sizes).`;
+
+  // ── the contact sheet ────────────────────────────────────────────────────
+  // Drawn from the same readback, magnified with smoothing off, so what you see
+  // is the literal device pixels the GPU produced.
+  const sheet = document.getElementById('sheet');
+  const tbl = document.createElement('table');
+  const head = document.createElement('tr');
+  head.appendChild(document.createElement('th'));
+  RADII.forEach(R => { const th = document.createElement('th');
+    th.textContent = R + 'px radius'; head.appendChild(th); });
+  tbl.appendChild(head);
+
+  for (const cs of cases) {
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td');
+    td0.className = 'name'; td0.textContent = cs.name;
+    tr.appendChild(td0);
+    for (const R of RADII) {
+      const data = render(shipped, cs.kind, cs.arch, cs.craft, R);
+      // crop to the glyph's own quad plus a little air, then magnify
+      const half = Math.ceil(R * 1.6) + 2, side = half * 2;
+      const src = document.createElement('canvas');
+      src.width = src.height = side;
+      const sx = src.getContext('2d');
+      const img = sx.createImageData(side, side);
+      for (let y = 0; y < side; y++) for (let x = 0; x < side; x++) {
+        // readPixels is bottom-up; flip so the sheet matches the screen
+        const gx = (SIZE/2 - half) + x, gy = (SIZE/2 - half) + (side - 1 - y);
+        const s = (gy * SIZE + gx) * 4, d = (y * side + x) * 4;
+        img.data[d] = data[s]; img.data[d+1] = data[s+1];
+        img.data[d+2] = data[s+2]; img.data[d+3] = data[s+3];
+      }
+      sx.putImageData(img, 0, 0);
+      const out = document.createElement('canvas');
+      out.width = out.height = side * ZOOM;
+      const ox = out.getContext('2d');
+      ox.imageSmoothingEnabled = false;
+      ox.drawImage(src, 0, 0, out.width, out.height);
+      const td = document.createElement('td');
+      td.appendChild(out);
+      const cap = document.createElement('small');
+      cap.textContent = side + '×' + side + ' device px, ' + ZOOM + '×';
+      td.appendChild(cap);
+      tr.appendChild(td);
+    }
+    tbl.appendChild(tr);
+  }
+  sheet.appendChild(tbl);
+})();
+</script>

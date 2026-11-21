@@ -1,0 +1,23 @@
+services:
+  nextcloud:
+    image: nextcloud:stable
+    labels:
+      - "traefik.http.routers.nextcloud.rule=Host(`cloud.solaris.lab`)"
+
+  nextcloud-db:
+    image: postgres:16-alpine
+
+  karakeep:
+    image: ghcr.io/karakeep-app/karakeep:release
+    labels:
+      - "traefik.http.routers.karakeep.rule=Host(`links.solaris.lab`)"
+
+  syncthing:
+    image: syncthing/syncthing:latest
+    labels:
+      - "traefik.http.routers.syncthing.rule=Host(`sync.solaris.lab`)"
+
+  n8n:
+    image: n8nio/n8n:latest
+    labels:
+      - "traefik.http.routers.n8n.rule=Host(`flow.solaris.lab`)"

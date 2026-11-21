@@ -1,0 +1,152 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>hull sheet — orrery</title>
+<!--
+  hull-sheet.html — look at what dev/bake.js produced, LIT.
+
+  The atlases are not pictures: albedo is neutral grey and the shape lives in a
+  view-space normal map, because the chart lights hulls at runtime with the same
+  sun that lights the planets. Opening the PNGs directly therefore tells you
+  almost nothing — you get flat grey blobs. This page does what the shader will
+  do, so you are judging the thing you will actually see.
+
+  The sun direction is draggable. Most hull problems only show up when the light
+  moves, which is the whole reason for baking normals instead of sprites.
+
+      python3 -m http.server 8000     # from the repo root
+      open http://localhost:8000/dev/hull-sheet.html
+-->
+<style>
+  body { background:#080b12; color:#c8d3e0; margin:0; padding:24px 28px;
+         font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  h1 { font:600 12px/1 ui-monospace,monospace; letter-spacing:.22em;
+       text-transform:uppercase; color:#8fa3ba; margin:0 0 6px; }
+  p.sub { color:#5f7186; margin:0 0 18px; font-size:11px; letter-spacing:.06em; }
+  #grid { display:flex; flex-wrap:wrap; gap:14px; }
+  figure { margin:0; }
+  canvas { display:block; background:#0b111b; border:1px solid #16202f; border-radius:3px; }
+  figcaption { color:#8fa3ba; font-size:10px; letter-spacing:.13em;
+               text-transform:uppercase; margin-top:5px; }
+  figcaption i { display:block; font-style:normal; color:#4d5f74; font-size:9px; }
+  #bar { margin:0 0 16px; color:#5f7186; font-size:11px; }
+  #bar input { vertical-align:middle; }
+</style>
+<h1>Orrery · hull sheet</h1>
+<p class="sub">Baked albedo + view-space normal + emissive, lit the way the chart lights them.</p>
+<div id="bar">sun <input type="range" id="sun" min="0" max="360" value="35" style="width:220px">
+  <span id="sunv">35°</span> · scale <input type="range" id="zoom" min="48" max="440" value="128" style="width:150px">
+  <span id="zoomv">128px</span></div>
+<div id="grid"></div>
+<script>
+(async () => {
+  /* ?only=relay reads the high-resolution single-family atlas that
+     `node dev/bake.js --only relay --cell 420` writes. One breed at a time,
+     big enough to actually see, because judging a hull from a thumbnail in a
+     grid of a hundred is how obviously ugly things get shipped. */
+  const ONLY = new URLSearchParams(location.search).get("only");
+  const tag = ONLY ? `hulls-${ONLY}` : "hulls";
+  const man = await (await fetch(`../src/${tag}.json?` + Date.now())).json();
+  const load = u => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const [alb, nrm] = await Promise.all([
+    load(`../src/${tag}-albedo.png?` + Date.now()),
+    load(`../src/${tag}-normal.png?` + Date.now()),
+  ]);
+  document.querySelector("h1").textContent = ONLY ? `Orrery · ${ONLY}` : "Orrery · hull sheet";
+
+  const pick = (img) => {
+    const c = document.createElement("canvas");
+    c.width = man.width; c.height = man.height;
+    c.getContext("2d").drawImage(img, 0, 0);
+    return c.getContext("2d").getImageData(0, 0, man.width, man.height).data;
+  };
+  const A = pick(alb), N = pick(nrm);
+
+  /* One trademark colour per breed. Kept muted — a radiator that glows hot
+     reads as damage, not as heat rejection. */
+  const ACCENTS = {
+    1: { c: [1.00, 0.84, 0.55], tint: 0.9 },   // warm window
+    2: { c: [1.00, 0.58, 0.22], tint: 0.8 },   // radiator, amber
+    3: { c: [0.45, 0.76, 1.00], tint: 0.9 },   // courier exhaust, blue
+    4: { c: [0.35, 0.95, 0.95], tint: 0.9 },   // relay beacon, cyan
+    5: { c: [0.26, 0.32, 0.72], tint: 0.85 },  // solar cells, indigo (no glow)
+    6: { c: [0.92, 0.96, 1.00], tint: 0.9 },   // sensor eye, cold white
+    7: { c: [1.00, 0.30, 0.24], tint: 0.9 },   // derelict, failing red
+  };
+
+  /* Only every heading frame is interesting for craft; show a few so the sheet
+     stays readable, and all variants for structures. */
+  const shown = man.cells.filter(c => !man.craft.includes(c.f) || c.h % (ONLY ? 3 : 6) === 0);
+
+  const grid = document.getElementById("grid");
+  const figs = shown.map(cell => {
+    const fig = document.createElement("figure");
+    const cv = document.createElement("canvas");
+    const cap = document.createElement("figcaption");
+    cap.innerHTML = cell.f + "<i>" +
+      (man.craft.includes(cell.f) ? "heading " + Math.round(cell.h / man.headings * 360) + "°"
+                                  : "variant " + cell.v) + "</i>";
+    fig.appendChild(cv); fig.appendChild(cap); grid.appendChild(fig);
+    return { cell, cv };
+  });
+
+  function draw(angleDeg, size) {
+    const a = angleDeg * Math.PI / 180;
+    // the chart's sun is a direction in screen space; z leans toward the viewer
+    const L = [Math.cos(a), Math.sin(a), 0.42];
+    const Ln = Math.hypot(...L); L[0] /= Ln; L[1] /= Ln; L[2] /= Ln;
+    const S = man.cell;
+
+    for (const { cell, cv } of figs) {
+      cv.width = S; cv.height = S;
+      cv.style.width = size + "px"; cv.style.height = size + "px";
+      cv.style.imageRendering = size > S ? "pixelated" : "auto";
+      const ctx = cv.getContext("2d");
+      const out = ctx.createImageData(S, S);
+      const ox = cell.c * S, oy = cell.r * S;
+      for (let y = 0; y < S; y++) {
+        for (let x = 0; x < S; x++) {
+          const s = ((oy + y) * man.width + (ox + x)) * 4;
+          const d = (y * S + x) * 4;
+          const cov = A[s + 3] / 255;
+          if (cov < 0.004) { out.data[d + 3] = 0; continue; }
+          const nx = N[s] / 255 * 2 - 1, ny = N[s+1] / 255 * 2 - 1, nz = N[s+2] / 255 * 2 - 1;
+          const emit = N[s + 3] / 255;
+          const alb = A[s] / 255;
+          const ao  = A[s + 1] / 255;
+          const dif = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+          /* AO multiplies the AMBIENT, not the key light — occlusion blocks the
+             sky, it does not block the sun. Applying it to everything is the
+             usual way baked AO ends up looking like dirt. */
+          let v = alb * (0.30 * ao + 1.15 * dif * (0.35 + 0.65 * ao));
+          let r = v * 0.86, g = v * 0.90, b = v * 1.0;
+          /* Each breed's trademark colour, keyed off the accent id. A hue with
+             no emissive (solar) tints the surface; one with emissive adds light
+             on top of whatever the sun is doing. */
+          const acc = ACCENTS[Math.round(A[s + 2] / 24)] || null;
+          if (acc) {
+            r = r * (1 - acc.tint) + v * acc.c[0] * acc.tint * 2.2;
+            g = g * (1 - acc.tint) + v * acc.c[1] * acc.tint * 2.2;
+            b = b * (1 - acc.tint) + v * acc.c[2] * acc.tint * 2.2;
+            r += emit * acc.c[0]; g += emit * acc.c[1]; b += emit * acc.c[2];
+          }
+          out.data[d]   = Math.min(255, r * 255);
+          out.data[d+1] = Math.min(255, g * 255);
+          out.data[d+2] = Math.min(255, b * 255);
+          out.data[d+3] = cov * 255;
+        }
+      }
+      ctx.putImageData(out, 0, 0);
+    }
+  }
+
+  const sun = document.getElementById("sun"), zoom = document.getElementById("zoom");
+  const redraw = () => {
+    document.getElementById("sunv").textContent = sun.value + "°";
+    document.getElementById("zoomv").textContent = zoom.value + "px";
+    draw(Number(sun.value), Number(zoom.value));
+  };
+  sun.addEventListener("input", redraw);
+  zoom.addEventListener("input", redraw);
+  redraw();
+})();
+</script>

@@ -1,0 +1,5 @@
+services:
+  wireguard-gw:
+    image: lscr.io/linuxserver/wireguard:latest
+    labels:
+      - "orrery.enable=true"

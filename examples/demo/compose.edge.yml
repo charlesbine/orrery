@@ -1,0 +1,18 @@
+services:
+  traefik:
+    image: traefik:v3.2
+    labels:
+      - "traefik.http.routers.traefik.rule=Host(`traefik.solaris.lab`)"
+
+  authentik:
+    image: ghcr.io/goauthentik/server:latest
+    labels:
+      - "traefik.http.routers.authentik.rule=Host(`auth.solaris.lab`)"
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    labels:
+      - "orrery.enable=true"

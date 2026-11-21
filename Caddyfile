@@ -1,0 +1,43 @@
+# Orrery — static file server for the fleet star chart.
+#
+# Binds plain HTTP on :8080 so your edge reverse proxy (Traefik, Caddy, Nginx,
+# Tailscale Serve) handles TLS and authentication.
+
+:8080 {
+	encode gzip zstd
+
+	# Serve the live synced roster from orrery-sync when present, falling back
+	# to the built-in snapshot so the container always boots cleanly.
+	handle /services.generated.js {
+		root * /srv
+		try_files /generated/services.js /services.generated.js
+		file_server
+	}
+
+	# Optional: expose Gatus's read-only status API same-origin so station light
+	# follows live health checks without exposing credentials to the browser.
+	# Note: Gatus responses include endpoint hostnames, conditions, and errors, so
+	# keep /api/status behind the same auth layer as Orrery itself.
+	# Uncomment when running alongside Gatus on a shared Docker network:
+	#
+	# handle /api/status {
+	# 	rewrite * /api/v1/endpoints/statuses
+	# 	reverse_proxy gatus:8080
+	# }
+
+	handle {
+		root * /srv
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Cache-Control "no-cache"
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

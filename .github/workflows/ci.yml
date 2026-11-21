@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run static checks, smoke tests, bundle check, and unit tests
+        run: npm run verify
+      - name: Check synced roster freshness
+        run: node bin/orrery.js sync --check
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+      - name: Build web image target
+        run: docker build --target web -t orrery:ci-web .
+      - name: Build sync image target
+        run: docker build --target sync -t orrery:ci-sync .

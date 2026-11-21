@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Orrery — Homelab Star Chart</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>%F0%9F%AA%90</text></svg>">
+<link rel="stylesheet" href="orrery.css">
+</head>
+<body>
+<div class="orrery" id="stage">
+  <canvas id="stars"></canvas>
+  <canvas id="backdrop"></canvas>
+  <canvas id="bodies"></canvas>
+  <canvas id="overlay"></canvas>
+
+  <div class="chrome plate">
+    <h1 id="plateTitle">Orrery</h1>
+    <div class="rule"></div>
+    <p>
+      <span class="k">chart</span> <span id="plateChart">homelab fleet · orbital plane 24°</span><br>
+      <span class="k">epoch</span> <span id="epoch">—</span><br>
+      <span class="k">bodies</span> <span id="count">—</span> · <span class="k">rate</span> <span id="rate">—</span>
+    </p>
+  </div>
+
+  <div class="chrome legend">
+    <dl>
+      <dt><i class="swatch sw-ok"></i></dt>       <dd>lit · healthy</dd>
+      <dt><i class="swatch sw-degrade"></i></dt>  <dd>wavering · degraded</dd>
+      <dt><i class="swatch sw-down"></i></dt>     <dd>dark · down</dd>
+      <dt><i class="swatch sw-fade"></i></dt>     <dd>fading · decommissioning</dd>
+      <dt><i class="swatch sw-res"></i></dt>      <dd>unlit · name reserved</dd>
+    </dl>
+  </div>
+
+  <div class="chrome hint">
+    <kbd>drag</kbd> / <kbd>wasd</kbd> pan · <kbd>scroll</kbd> zoom<br>
+    <kbd>space</kbd> hold · <kbd>u</kbd> unallocated<br>
+    <kbd>click</kbd> a body<br>
+    <kbd>⌘K</kbd> / <kbd>⌘F</kbd> find · <kbd>esc</kbd> release
+  </div>
+
+  <aside class="readout" id="readout" aria-live="polite" hidden></aside>
+
+  <div class="cmdk" id="cmdk" role="dialog" aria-label="Command menu" hidden>
+    <!-- Diagnostics ride along at the top: this panel is still the instrument,
+         but reading the frame budget is a glance and finding a body is a task,
+         so the task gets the focus and the keyboard. -->
+    <div class="cmdk-diag">
+      <div class="cmdk-head">
+        <span class="cmdk-title">Instrument</span>
+        <span class="cmdk-kbd">esc</span>
+      </div>
+      <div class="fps-num"><span id="fpsNow">—</span><small>fps</small></div>
+      <div class="fps-meta">
+        <span id="fpsMs">— ms/frame</span>
+        <span id="fpsLow">— worst</span>
+      </div>
+      <canvas id="fpsGraph" width="272" height="34" aria-hidden="true"></canvas>
+      <dl class="cmdk-stats">
+        <dt>bodies</dt><dd id="stBodies">—</dd>
+        <dt>orbits</dt><dd id="stOrbits">—</dd>
+        <dt>zoom</dt><dd id="stZoom">—</dd>
+        <dt class="wide">back/body/over</dt><dd class="wide" id="stCost">—</dd>
+        <dt class="wide">render scale</dt><dd class="wide" id="stScale">—</dd>
+      </dl>
+    </div>
+
+    <div class="cmdk-find">
+      <input type="text" id="cmdkInput" autocomplete="off" spellcheck="false"
+             placeholder="find a body, station, transfer, action…"
+             role="combobox" aria-expanded="false" aria-autocomplete="list"
+             aria-controls="cmdkList">
+    </div>
+    <ul class="cmdk-list" id="cmdkList" role="listbox" aria-label="Results"></ul>
+    <div class="cmdk-empty" id="cmdkEmpty" hidden>nothing by that name</div>
+
+    <!-- Speed and scale stay dials. They are continuous, and a command list is
+         the wrong shape for a value you want to feel your way to. -->
+    <label class="cmdk-row">
+      <span>Speed</span>
+      <input type="range" id="ctlSpeed" min="0.05" max="2" step="0.05">
+      <output id="outSpeed"></output>
+    </label>
+
+    <label class="cmdk-row">
+      <span>Scale</span>
+      <input type="range" id="ctlScale" min="0" max="4" step="1">
+      <output id="outScale"></output>
+    </label>
+  </div>
+</div>
+<script src="services.generated.js"></script>
+<script src="fleet.js"></script>
+<script src="greeble.js"></script>
+<script src="hulls.js"></script>
+<script src="hulls-atlas.js"></script>
+<script src="shaders.js"></script>
+<script src="orrery.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+endpoints:
+  - name: traefik
+    group: Core
+  - name: authentik
+    group: Core
+  - name: gatus
+    group: Core
+  - name: orrery
+    group: Core
+  - name: grafana
+    group: Monitoring
+  - name: prometheus
+    group: Monitoring
+  - name: loki
+    group: Monitoring
+  - name: paperless-ngx
+    group: Home
+  - name: vaultwarden
+    group: Home
+  - name: nextcloud
+    group: Apps
+  - name: nextcloud cron
+    group: Apps
+  - name: karakeep
+    group: Apps
+  - name: jellyfin
+    group: Media
+  - name: immich
+    group: Storage
+  - name: forgejo
+    group: Storage
+  - name: home-assistant
+    group: Home
+  - name: ollama
+    group: Compute
+  - name: caddy-edge
+    group: Edge
+  - name: status-page
+    group: Public

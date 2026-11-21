@@ -1,0 +1,7 @@
+# Committed snapshots (orrery.html, src/services.generated.js) are tracked intentionally.
+# Ignore local OS/tooling files and intermediate hull-baking outputs.
+.DS_Store
+.playwright-mcp/
+src/hulls-*-albedo.png
+src/hulls-*-normal.png
+src/hulls-*.json

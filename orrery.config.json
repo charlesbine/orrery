@@ -1,0 +1,74 @@
+{
+  "version": 2,
+  "fleet": {
+    "name": "solaris.lab",
+    "heading": "Orrery",
+    "title": "Orrery — solaris.lab",
+    "chart": "solaris.lab fleet · orbital plane 24°",
+    "status": {
+      "adapter": "auto",
+      "url": "/api/status",
+      "selfId": "svc-europa-gatus",
+      "intervalMs": 30000
+    }
+  },
+  "defaultHost": "europa",
+  "discovery": {
+    "mode": "routed",
+    "composeFiles": [
+      { "path": "examples/demo/compose.edge.yml", "host": "europa", "shell": "edge" },
+      { "path": "examples/demo/compose.ops.yml", "host": "europa", "shell": "ops" },
+      { "path": "examples/demo/compose.monitoring.yml", "host": "europa", "shell": "monitoring" },
+      { "path": "examples/demo/compose.home.yml", "host": "europa", "shell": "home" },
+      { "path": "examples/demo/compose.apps.yml", "host": "europa", "shell": "apps" },
+      { "path": "examples/demo/compose.ai.yml", "host": "europa", "shell": "ai" },
+      { "path": "examples/demo/compose.gateway.yml", "host": "europa", "shell": "gateway" }
+    ],
+    "dynamicTraefikFile": "examples/demo/traefik.services.yml",
+    "gatusFile": "examples/demo/gatus.yaml"
+  },
+  "excludeSources": [
+    "dynamic:opnsense"
+  ],
+  "sourceOverrides": {
+    "dynamic:ollama": { "host": "mercury" },
+    "dynamic:open-webui": { "host": "mercury" },
+    "dynamic:comfyui": { "host": "mercury" },
+    "dynamic:whisper": { "host": "mercury" },
+    "dynamic:forgejo": { "host": "ceres" },
+    "dynamic:immich": { "host": "ceres" },
+    "dynamic:minio-web": { "product": "minio", "name": "minio", "host": "ceres" },
+    "dynamic:minio-s3": { "product": "minio", "name": "minio", "host": "ceres" },
+    "dynamic:restic": { "host": "ceres" },
+    "dynamic:home-assistant": { "host": "vesta" },
+    "dynamic:zigbee2mqtt": { "host": "vesta" },
+    "dynamic:jellyfin": { "host": "pallas" },
+    "dynamic:navidrome": { "host": "pallas" },
+    "dynamic:audiobookshelf": { "host": "pallas" }
+  },
+  "productOverrides": {
+    "traefik": { "health": [["Core", "traefik"]] },
+    "authentik": { "health": [["Core", "authentik"]] },
+    "gatus": { "health": [["Core", "gatus"]] },
+    "orrery": { "health": [["Core", "orrery"]] },
+    "grafana": { "health": [["Monitoring", "grafana"]] },
+    "prometheus": { "health": [["Monitoring", "prometheus"]] },
+    "loki": { "health": [["Monitoring", "loki"]] },
+    "paperless-ngx": { "health": [["Home", "paperless-ngx"]] },
+    "vaultwarden": { "health": [["Home", "vaultwarden"]] },
+    "nextcloud": { "state": "degraded", "health": [["Apps", "nextcloud"], ["Apps", "nextcloud cron"]] },
+    "karakeep": { "state": "down", "health": [["Apps", "karakeep"]] },
+    "jellyfin": { "health": [["Media", "jellyfin"]] },
+    "immich": { "health": [["Storage", "immich"]] },
+    "forgejo": { "health": [["Storage", "forgejo"]] },
+    "home-assistant": { "health": [["Home", "home-assistant"]] },
+    "ollama": { "health": [["Compute", "ollama"]] },
+    "caddy-edge": { "health": [["Edge", "caddy-edge"]] },
+    "status-page": { "health": [["Public", "status-page"]] }
+  },
+  "extraProducts": [
+    { "product": "mosquitto", "name": "mosquitto", "host": "vesta" },
+    { "product": "caddy-edge", "name": "caddy-edge", "host": "charon" },
+    { "product": "status-page", "name": "status-page", "host": "polaris" }
+  ]
+}

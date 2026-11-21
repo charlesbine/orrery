@@ -1,0 +1,325 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>forge — orrery hulls</title>
+<!--
+  forge.html — hulls under a REAL renderer.
+
+  The software rasteriser in bake.js is a flat-shaded z-buffer with one lambert
+  term. It is fine for producing the channels the chart samples and hopeless for
+  judging whether a hull looks good, because it cannot produce a good-looking
+  image from any geometry. Metal reads as metal because it REFLECTS something;
+  with no environment there is nothing to reflect and everything is grey.
+
+  So: three.js, PBR metal, an environment to reflect, a key with soft shadows, a
+  cool rim to lift the silhouette off the black, and filmic tone mapping. This
+  is where hull design happens. bake.js stays the thing that ships.
+
+      python3 -m http.server 8000
+      open http://localhost:8000/dev/forge.html?only=relay
+-->
+<style>
+  body { background:#07090e; color:#c8d3e0; margin:0; padding:20px 24px;
+         font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  h1 { font:600 12px/1 ui-monospace,monospace; letter-spacing:.22em;
+       text-transform:uppercase; color:#8fa3ba; margin:0 0 14px; }
+  #bar { color:#5f7186; margin:0 0 14px; }
+  #grid { display:flex; flex-wrap:wrap; gap:12px; }
+  figure { margin:0; }
+  figcaption { color:#7d90a6; font-size:10px; letter-spacing:.13em;
+               text-transform:uppercase; margin-top:5px; }
+</style>
+<h1 id="title">Orrery · forge</h1>
+<div id="bar">
+  key <input type="range" id="key" min="0" max="360" value="295" style="width:180px">
+  <span id="keyv"></span> ·
+  rough <input type="range" id="rough" min="5" max="95" value="38" style="width:120px">
+  <span id="roughv"></span> ·
+  size <input type="range" id="size" min="200" max="900" value="460" style="width:120px">
+</div>
+<div id="grid"></div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { RoomEnvironment } from "./vendor/RoomEnvironment.js";
+
+/* Loaded with a cache-buster rather than a plain <script src>. Hull design is
+   an edit-look-edit loop and a stale hulls.js silently shows you the previous
+   shape, which is worse than an error. */
+await (async () => {
+  for (const f of ["greeble.js", "hulls.js"]) {
+    const src = await (await fetch(`../src/${f}?v=` + Date.now())).text();
+    new Function(src)();
+  }
+})();
+
+const { FAMILIES, CRAFT, rng } = window.HULLS;
+const P = new URLSearchParams(location.search);
+const ONLY = P.get("only") || "relay";
+const COUNT = Number(P.get("n") || 4);
+
+/* ?only=all is the contact sheet: every family, every variant, one grid, all
+   under the same light. Judging a family in isolation is how a fleet ends up
+   with eleven hulls that are individually defensible and share no language —
+   the only way to see that is side by side. */
+/* "all", "craft", or a comma-separated list. Comparing a subset side by side
+   is how you see whether three breeds actually differ — one at a time you
+   judge each against nothing and they all pass. */
+const PICK = ONLY === "all"   ? Object.keys(FAMILIES)
+           : ONLY === "craft" ? [...CRAFT]
+           : ONLY.split(",").filter(f => FAMILIES[f]);
+const CELLS = PICK.flatMap(f =>
+  Array.from({ length: COUNT }, (_, i) => ({ f, i })));
+document.getElementById("title").textContent = "Orrery · forge · " + ONLY;
+
+/* The chart's viewing geometry. Orthographic, 24° above the orbital plane,
+   which is the one angle any of this is ever seen from. */
+const TILT = 0.40, COS = Math.sqrt(1 - TILT * TILT);
+
+/* Materials. Metalness high and roughness varied — the variation between
+   parts is most of what stops a hull reading as one moulded lump. */
+/* Hull albedos are far darker than they look right. A painted spacecraft panel
+   sits around 0.45–0.55 linear; anything near white clips the moment a key hits
+   it, and a render with no midtone between black and blown-out is the flat
+   rasteriser's failure mode arriving by a different road. */
+const MATS = (rough, accent) => ({
+  0: new THREE.MeshStandardMaterial({ color: 0x8b949f, metalness: 0.62, roughness: rough, vertexColors: true }),
+  1: new THREE.MeshStandardMaterial({ color: 0x545c67, metalness: 0.58, roughness: rough * 1.5, vertexColors: true }),
+  2: new THREE.MeshStandardMaterial({ color: 0x6a7078, metalness: 0.80, roughness: rough * 0.7, vertexColors: true }),
+  3: new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.92, roughness: rough * 0.45, vertexColors: true }),
+  4: new THREE.MeshStandardMaterial({ color: 0x2a2e36, emissive: 0xffca7a,
+                                      emissiveIntensity: 2.6, roughness: 0.4 }),
+  5: new THREE.MeshStandardMaterial({ color: 0x8f959c, metalness: 0.12, roughness: 0.70, vertexColors: true }),
+  /* Solar drinks light — near-black with a glassy specular, so it reads as a
+     dark void in the silhouette with one hard highlight sliding across it. */
+  6: new THREE.MeshStandardMaterial({ color: 0x151a38, vertexColors: true, metalness: 0.35, roughness: 0.16 }),
+  /* Radiator is matte white, deliberately the brightest diffuse thing in the
+     fleet: it is the one surface that must not look metallic. */
+  /* A radiator is REJECTING heat, so it runs hot — a dark amber emission,
+     barely above the white it already is on the lit side and unmistakable on
+     the shadowed one. Kept dim on purpose: a radiator that glows brightly
+     reads as a fire, and the point is that this is the ship working, not the
+     ship failing. */
+  7: new THREE.MeshStandardMaterial({ color: 0xd6d9dc, metalness: 0.02, roughness: 0.78,
+                                      vertexColors: true,
+                                      emissive: 0x3a1c08, emissiveIntensity: 0.35 }),
+  /* A nozzle's throat. Emissive, but recessed inside the bell, so this glows
+     as a bounded crescent rather than a haze hanging off the ship. */
+  /* DoubleSide: the throat is a cone wound to face out of the mouth, and a
+     one-sided miss makes the engine a black hole instead of a hot one. */
+  /* Sodium. Low-pressure sodium light is about the most specific colour there
+     is — 589nm, a narrow warm amber — and metal dumping heat glows near it.
+     Emissive but dim, and it is the TUBES only: the cool white structure
+     around them is what makes the glow read as heat rather than as paint. */
+  /* Hot metal, GLOSSY, and only faintly emissive.
+     Emissive shades flat — it ignores the normal entirely — so a strongly
+     emissive tube throws away the very roundness that makes it read as a
+     tube, which is exactly how these ended up as painted orange lines. The
+     glow is therefore kept low, just enough to stay alive in shadow, and the
+     cylindrical form is carried by a tight specular highlight running down the
+     length of each tube. Low roughness is doing most of the work here. */
+  9: new THREE.MeshStandardMaterial({ color: 0x8a4a1c, metalness: 0.38, roughness: 0.30,
+                                      vertexColors: true,
+                                      emissive: 0xff8a1e, emissiveIntensity: 0.06 }),
+  /* Livery: PAINT. Low metalness and no emission on purpose — an accent that
+     glows competes with the shape it is meant to be secondary to. */
+  10: new THREE.MeshStandardMaterial({ color: accent, metalness: 0.10, roughness: 0.55,
+                                       vertexColors: true }),
+  // an ion throat, taking the family's colour
+  11: new THREE.MeshStandardMaterial({ color: 0x101418, emissive: accent,
+                                       emissiveIntensity: 1.0, roughness: 0.4,
+                                       side: THREE.DoubleSide }),
+  /* Exhaust. Additive and depth-write off, so a plume brightens what is
+     behind it instead of cutting a hole in it, and never occludes its own
+     far end. */
+  12: new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.30,
+                                    blending: THREE.AdditiveBlending,
+                                    depthWrite: false, side: THREE.DoubleSide,
+                                    vertexColors: true }),
+  8: new THREE.MeshStandardMaterial({ color: 0x1a1410, emissive: 0xff9a4a,
+                                      emissiveIntensity: 1.35, roughness: 0.5,
+                                      side: THREE.DoubleSide }),
+});
+
+function toGeometry(m) {
+  /* Group triangles by material so one mesh can carry the whole hull, and let
+     three compute flat normals — these are machined surfaces, not organic. */
+  const byMat = new Map(), fades = new Map();
+  for (const tri of m.tris) {
+    const [a, b, c, mat] = tri;
+    if (!byMat.has(mat)) byMat.set(mat, []);
+    byMat.get(mat).push(a, b, c);
+    /* A plume carries a per-vertex ramp instead of a plate tone. Fed through
+       as vertex colour it fades to black, and against additive blending black
+       is invisible — so the exhaust dissolves rather than ending. */
+    if (tri.fade) { const f = fades.get(mat) || []; f.push(...tri.fade); fades.set(mat, f); }
+  }
+  const pos = [], col = [], groups = [];
+  let start = 0;
+  const order = [...byMat.keys()].sort((x, y) => x - y);
+
+  /* PER-PLATE TONAL VARIATION, as vertex colour.
+   *
+   * These meshes have no UVs, so there is no texture to hang on them — but the
+   * thing a texture would actually buy here is not pattern, it is the fact
+   * that a real hull is assembled from hundreds of separate plates that do not
+   * match. Different production batches, different ages, different amounts of
+   * sun. A material with one flat colour across ten thousand triangles reads
+   * as moulded plastic no matter how good the geometry is, and that is most of
+   * what is still missing from these hulls.
+   *
+   * Hashed off the triangle's own position so it is stable across rebakes and
+   * a plate keeps its tone when the seed moves something else. */
+  const tone = (v) => {
+    let h = Math.imul(Math.round(v[0] * 5000) ^ 0x9e37, 0x85eb);
+    h = Math.imul(h ^ Math.round(v[1] * 5000), 0xc2b2);
+    h = Math.imul(h ^ Math.round(v[2] * 5000), 0x27d4);
+    h = (h ^ (h >>> 15)) >>> 0;
+    /* Deliberately narrow. Wide variation stops reading as plating and starts
+       reading as damage or as noise in the render. */
+    const t = 0.88 + (h / 4294967296) * 0.24;
+    // and a touch of hue drift, warm to cool, so it is not just brightness
+    const w = ((h >>> 9) / 8388608) * 0.05 - 0.025;
+    return [t * (1 + w), t, t * (1 - w * 0.6)];
+  };
+  /* addGroup takes an index into the MATERIAL ARRAY, not the material id. The
+     array is compacted to the ids actually present, so passing the raw id
+     silently renders nothing for anything past the array's length — which is
+     how the dish became an empty hoop the moment it got id 5. */
+  order.forEach((mat, slot) => {
+    const idx = byMat.get(mat);
+    const fd = fades.get(mat);
+    for (let k = 0; k < idx.length; k += 3) {
+      /* One tone for the whole triangle — a plate is flat, and interpolating
+         colour across it would smear the plate boundaries away again. */
+      const c = tone(m.verts[idx[k]]);
+      for (let j = 0; j < 3; j++) {
+        const v = m.verts[idx[k + j]];
+        pos.push(v[0], v[1], v[2]);
+        if (fd) { const f = fd[k + j]; col.push(f, f, f); }
+        else col.push(c[0], c[1], c[2]);
+      }
+    }
+    groups.push({ start, count: idx.length, slot });
+    start += idx.length;
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  groups.forEach(gr => g.addGroup(gr.start, gr.count, gr.slot));
+  g.computeVertexNormals();
+  return { geometry: g, order };
+}
+
+const grid = document.getElementById("grid");
+const views = CELLS.map(({ f, i }) => {
+  const fig = document.createElement("figure");
+  const cap = document.createElement("figcaption");
+  cap.textContent = f + " · " + (CRAFT.has(f)
+    ? "heading " + Math.round((i / COUNT) * 360) + "°" : "variant " + i);
+  fig.appendChild(cap);
+  grid.appendChild(fig);
+  return { fig, cap, i, f };
+});
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(2);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.80;
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envRT = pmrem.fromScene(new RoomEnvironment(), 0.04);
+
+function build(rough, keyDeg, size) {
+  const a = keyDeg * Math.PI / 180;
+
+  for (const v of views) {
+    const scene = new THREE.Scene();
+    scene.environment = envRT.texture;
+    /* The room is here to give metal something to reflect, not to light the
+       ship. At full strength it washes every surface to the same value and
+       every panel edge the greebler worked for disappears. */
+    scene.environmentIntensity = 0.30;
+
+    const liv = (window.HULLS.LIVERY || {})[v.f] || [0.8, 0.84, 0.9];
+    const mats = MATS(rough, new THREE.Color(liv[0], liv[1], liv[2]));
+    const seed = v.f.length * 977 + (CRAFT.has(v.f) ? 0 : v.i) * 7919 + 13;
+    const m = FAMILIES[v.f](rng(seed));
+    const { geometry, order } = toGeometry(m);
+    const mesh = new THREE.Mesh(geometry, order.map(k => mats[k] || mats[0]));
+    mesh.castShadow = mesh.receiveShadow = true;
+    if (CRAFT.has(v.f)) mesh.rotation.z = (v.i / COUNT) * Math.PI * 2;
+
+    /* Stand the model into the chart's frame: rotate the world so we look from
+       24° above the plane, then render orthographically. */
+    const root = new THREE.Group();
+    root.add(mesh);
+    root.rotation.x = -Math.asin(COS);
+    scene.add(root);
+
+    // frame it
+    const box = new THREE.Box3().setFromObject(root);
+    const sz = box.getSize(new THREE.Vector3());
+    const ctr = box.getCenter(new THREE.Vector3());
+    const span = Math.max(sz.x, sz.y) * 1.15 || 1;
+
+    const cam = new THREE.OrthographicCamera(-span/2, span/2, span/2, -span/2, -50, 50);
+    cam.position.set(ctr.x, ctr.y, 20);
+    cam.lookAt(ctr.x, ctr.y, 0);
+
+    /* Key, fill, rim. The rim is doing the most work: a cool light from behind
+       separates the silhouette from the black, which is the single thing that
+       makes hardware look photographed rather than drawn. */
+    const key = new THREE.DirectionalLight(0xfff2dc, 2.1);
+    /* RAKING, not frontal. With the key up near the camera axis every surface
+       facing us sits in its mirror direction and blows to white, and — worse —
+       nothing casts a shadow across anything, so a hull covered in greebles
+       renders as flat as a bare one. Dropping the light almost into the plane
+       is how you photograph texture: the detail is read by its shadows. */
+    key.position.set(Math.cos(a) * 7, Math.sin(a) * 7, 4.0);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    const d = span * 0.8;
+    Object.assign(key.shadow.camera, { left: -d, right: d, top: d, bottom: -d, near: -30, far: 60 });
+    key.shadow.bias = -0.0009;
+    scene.add(key);
+
+    /* The rim also has to MODEL, not just outline. Anything facing away from
+       the key was falling to pure emissive plus ambient, and emissive shades
+       flat — so the away-facing radiator fins rendered as solid rust bars with
+       no roundness in them at all. Bringing the rim round toward the viewer
+       gives those surfaces a second highlight to be shaped by. */
+    const rim = new THREE.DirectionalLight(0x9fc8ff, 1.5);
+    rim.position.set(-Math.cos(a) * 5, -Math.sin(a) * 5, 2.5);
+    scene.add(rim);
+
+    scene.add(new THREE.HemisphereLight(0x2a3a55, 0x0a0d14, 0.35));
+
+    renderer.setSize(size, size, false);
+    renderer.render(scene, cam);
+
+    const img = new Image();
+    img.src = renderer.domElement.toDataURL();
+    img.width = size; img.height = size;
+    img.style.cssText = "display:block;background:#0b0f16;border:1px solid #16202f;border-radius:3px";
+    const old = v.fig.querySelector("img");
+    if (old) old.remove();
+    v.fig.insertBefore(img, v.cap);
+  }
+}
+
+const key = document.getElementById("key"), rough = document.getElementById("rough"),
+      size = document.getElementById("size");
+const go = () => {
+  document.getElementById("keyv").textContent = key.value + "°";
+  document.getElementById("roughv").textContent = (rough.value / 100).toFixed(2);
+  build(Number(rough.value) / 100, Number(key.value), Number(size.value));
+};
+[key, rough, size].forEach(el => el.addEventListener("change", go));
+go();
+window.FORGE = { go };
+</script>

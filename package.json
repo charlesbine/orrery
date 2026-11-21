@@ -1,0 +1,46 @@
+{
+  "name": "orrery",
+  "version": "1.0.0",
+  "description": "A live orbital star chart for your homelab fleet — layout is topology, state is light.",
+  "private": true,
+  "license": "MIT",
+  "author": "Charles Bine",
+  "homepage": "https://github.com/charlesbine/orrery#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/charlesbine/orrery.git"
+  },
+  "bugs": {
+    "url": "https://github.com/charlesbine/orrery/issues"
+  },
+  "bin": {
+    "orrery": "./bin/orrery.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "homelab",
+    "self-hosted",
+    "star-chart",
+    "webgl",
+    "docker-compose",
+    "tailscale",
+    "traefik",
+    "gatus",
+    "topology"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "sync": "node bin/orrery.js sync",
+    "sync:check": "node bin/orrery.js sync --check",
+    "layout": "node dev/layout.js",
+    "layout:write": "node dev/layout.js --write",
+    "clearance": "node dev/clearance.js",
+    "glsl": "node dev/glsl.js",
+    "smoke": "node dev/smoke.js",
+    "bundle": "node dev/bundle.js",
+    "bundle:check": "node dev/bundle.js --check",
+    "verify": "npm run glsl && npm run clearance && npm run smoke && npm run bundle:check && npm test"
+  }
+}

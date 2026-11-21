@@ -1,0 +1,457 @@
+/* ═══════════════════════════════════════════════════════════════════
+   ORRERY — a live orbital star chart for your homelab fleet
+   Deliberately single-theme: it is a night sky. Flat/matte throughout —
+   no blur, no bevel, no drop-shadow.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --void:    #05070d;   /* deep field — blue-biased near-black */
+  --slate:   #0f172a;   /* homepage ground */
+  --sun:     #ffd9a8;   /* the single warm light source */
+  --ice:     #cfe3f2;   /* cool off-white — all type */
+  --muted:   #64748b;   /* slate-500 */
+  --dim:     #37465c;
+  --accent:  #38bdf8;   /* sky-400 — selection only */
+  --indigo:  #818cf8;
+  --ember:   #f97362;   /* flares, dark bodies */
+  --hair:    rgba(207,227,242,0.13);
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono",
+          "Roboto Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Helvetica, Arial, sans-serif;
+}
+
+html { background: var(--void); }
+
+.orrery {
+  position: fixed; inset: 0;
+  background: var(--void);
+  overflow: hidden;
+  font-family: var(--sans);
+  color: var(--ice);
+  -webkit-font-smoothing: antialiased;
+  cursor: grab;
+  user-select: none;
+}
+.orrery.dragging { cursor: grabbing; }
+
+/* The RENDER LAYERS, and only those. This was `.orrery canvas`, which also
+   caught the fps sparkline nested inside the instrument panel and stretched it
+   to inset:0 — a 332px absolutely-positioned canvas in a 300px panel, drawn
+   straight through the panel's own title. Direct-child is the whole fix: the
+   four layers are children of .orrery, anything in a panel is a grandchild. */
+.orrery > canvas { position: absolute; inset: 0; display: block; }
+#backdrop { z-index: 1; }
+#bodies   { z-index: 2; }
+#overlay  { z-index: 3; }
+
+/* The starfield does not redraw — it only ever slides. Parking it on its own
+   layer and moving it with a transform hands the parallax to the compositor,
+   which is the difference between re-blitting a full-screen image on the CPU
+   every frame and not touching it at all. `inset: 0` is overridden because the
+   layer is deliberately larger than the viewport, so there is something to
+   slide into view. */
+#stars {
+  z-index: 0;
+  inset: auto; top: 0; left: 0;
+  opacity: 0.95;              /* was globalAlpha on the old per-frame blit */
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+}
+
+/* ── chrome ─────────────────────────────────────────────────────── */
+
+.chrome {
+  position: absolute; z-index: 4;
+  pointer-events: none;
+}
+.chrome > * { pointer-events: auto; }
+
+/* chart title, top-left */
+.plate { top: 26px; left: 28px; max-width: 25rem; }
+.plate h1 {
+  font-family: var(--sans);
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+  color: var(--ice);
+  text-wrap: balance;
+}
+.plate .rule {
+  height: 1px; background: var(--hair);
+  margin-bottom: 10px; width: 100%;
+}
+.plate p {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1.75;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.plate p .k { color: var(--dim); }
+
+/* legend, bottom-left */
+.legend { bottom: 24px; left: 28px; }
+.legend dl {
+  margin: 0; display: grid;
+  grid-template-columns: auto auto; gap: 5px 12px;
+  align-items: center;
+}
+.legend dt {
+  width: 34px; height: 9px; position: relative;
+}
+.legend dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.swatch { position: absolute; top: 50%; left: 0; transform: translateY(-50%);
+          width: 9px; height: 9px; border-radius: 50%; }
+.sw-ok      { background: #b9d4e8; }
+.sw-degrade { background: #6d7f92; }
+.sw-down    { background: #0d1118; border: 1px solid rgba(249,115,98,0.55); }
+.sw-fade    { background: rgba(185,212,232,0.22); }
+.sw-res     { background: transparent; border: 1px dashed rgba(129,140,248,0.5); }
+
+/* controls hint, bottom-right */
+.hint {
+  bottom: 24px; right: 28px; text-align: right;
+  font-family: var(--mono); font-size: 0.6rem;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--dim); line-height: 1.9;
+}
+.hint kbd {
+  font: inherit; color: var(--muted);
+  border: 1px solid var(--hair); border-radius: 3px;
+  padding: 0 4px;
+}
+
+/* ── readout ──────────────────────────────────────────────────────────
+   Diegetic on purpose: NOT a sidebar. There is no card, no fill, no border
+   box — the type is set directly on the void, anchored to the body it
+   describes by a leader line drawn on the overlay canvas, exactly like an
+   annotation on a printed star chart. Legibility comes from a soft scrim
+   painted behind it, which has no edge to read as a panel. */
+
+.readout {
+  position: absolute; z-index: 5;
+  width: 268px;
+  --readout-w: 268px;
+  padding-left: 13px;
+  border-left: 1px solid rgba(56,189,248,0.32);
+  display: grid; grid-template-columns: 1fr; gap: 11px;
+  opacity: 0;
+  transition: opacity .22s ease;
+  pointer-events: none;
+}
+/* Legibility backdrop. Feathered on all four edges by intersecting two linear
+   masks, so it has no border to read as a card — and being a layer on the
+   element, it is exactly the size of the type and never touches the map. */
+.readout::before {
+  content: "";
+  position: absolute;
+  inset: -26px -18px -26px -8px;
+  z-index: -1;
+  pointer-events: none;
+  /* Feathered on THREE edges with a single mask plus a gradient fill.
+     The earlier version intersected two masks via mask-composite, which does not
+     apply reliably — only the first mask took, so the panel rendered as a hard
+     rectangle: exactly the card this design exists to avoid.
+     The left edge stays defined on purpose; that is where the accent bracket and
+     the leader line meet, and a crisp edge there reads as an annotation rule. */
+  /* Feather generously. A 13px falloff is invisible against the void but reads
+     as a hard card edge the moment the readout sits over a lit body — which is
+     exactly where it lands when you focus a station. */
+  background: linear-gradient(to right,
+    rgba(4, 6, 11, 0.90) 0%,
+    rgba(4, 6, 11, 0.88) 52%,
+    rgba(4, 6, 11, 0.60) 80%,
+    rgba(4, 6, 11, 0) 100%);
+  -webkit-mask-image: linear-gradient(to bottom,
+    transparent 0, #000 34px, #000 calc(100% - 34px), transparent 100%);
+  mask-image: linear-gradient(to bottom,
+    transparent 0, #000 34px, #000 calc(100% - 34px), transparent 100%);
+}
+
+/* Only a long relation list scrolls, never the whole readout. */
+.readout ul.rel { max-height: none; }
+
+.readout.open { opacity: 1; pointer-events: auto; }
+
+/* Two-up once there is more in orbit than fits a single column: identity on the
+   left, everything orbiting on the right. The shell groups then flow into
+   sub-columns, kept whole by break-inside so a shell never splits mid-list. */
+.readout.wide { width: 596px; --readout-w: 596px;
+                grid-template-columns: 258px 1fr; gap: 0 26px; }
+.readout .col-a, .readout .col-b { display: flex; flex-direction: column; gap: 11px; min-width: 0; }
+.readout.wide .col-b { border-left: 1px solid var(--hair); padding-left: 24px; }
+.readout .relgroups { display: flex; flex-direction: column; gap: 13px; }
+.readout.wide .relgroups { display: block; column-count: 2; column-gap: 20px; }
+.readout .relgroup { break-inside: avoid; -webkit-column-break-inside: avoid;
+                     display: flex; flex-direction: column; gap: 4px; }
+.readout.wide .relgroup { margin-bottom: 13px; }
+.readout .dismiss { grid-column: 1 / -1; }
+/* mirrored when the body sits near the right edge */
+.readout.flip {
+  padding-left: 0; padding-right: 13px;
+  border-left: 0; border-right: 1px solid rgba(56,189,248,0.32);
+  text-align: right;
+}
+.readout.flip dl.spec { grid-template-columns: 1fr 6.4rem; direction: rtl; }
+.readout.flip dl.spec dt, .readout.flip dl.spec dd { direction: ltr; }
+.readout.flip .stations { justify-content: flex-end; }
+.readout.flip .dismiss { text-align: right; }
+.readout[hidden] { display: none; }
+
+.readout .eyebrow {
+  font-family: var(--mono); font-size: 0.57rem;
+  letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--accent);
+}
+.readout h2 {
+  font-size: 1.3rem; font-weight: 300; margin: 0;
+  letter-spacing: 0.03em; color: var(--ice); text-wrap: balance;
+}
+.readout .role {
+  font-family: var(--mono); font-size: 0.65rem;
+  color: var(--muted); line-height: 1.55; margin: -6px 0 0;
+}
+.readout .desc {
+  font-size: 0.775rem; line-height: 1.62; color: #9fb6cc; margin: 0;
+}
+.readout dl.spec {
+  margin: 0; display: grid; grid-template-columns: 6.4rem 1fr;
+  gap: 4px 12px; font-family: var(--mono); font-size: 0.63rem;
+  font-variant-numeric: tabular-nums;
+}
+.readout dl.spec dt { color: var(--dim); text-transform: uppercase;
+                      letter-spacing: 0.09em; }
+.readout dl.spec dd { margin: 0; color: #b9cddf; }
+.readout .rule-t { height: 1px; background: var(--hair); }
+.readout .desig {
+  font-family: var(--mono); font-size: 0.61rem;
+  letter-spacing: 0.13em; text-transform: uppercase;
+  color: #7f93a8; margin: -7px 0 0;
+}
+
+/* Related bodies — the readout doubles as navigation, so these are real
+   controls, not decoration. One row per target, with its live state as a dot. */
+.readout ul.rel { list-style: none; margin: 0; padding: 0; display: flex;
+                  flex-direction: column; gap: 1px; }
+.readout ul.rel button {
+  width: 100%; display: grid; grid-template-columns: 11px minmax(0, 1fr) minmax(0, auto);
+  align-items: baseline; gap: 7px;
+  background: none; border: 0; border-radius: 3px;
+  padding: 3px 5px 3px 0; cursor: pointer; text-align: left;
+  font: inherit; color: inherit;
+  transition: background .12s ease;
+}
+.readout ul.rel button:hover { background: rgba(56,189,248,0.10); padding-left: 5px; }
+.readout ul.rel button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.readout ul.rel .n {
+  font-family: var(--mono); font-size: 0.645rem; color: #cbdcea;
+  letter-spacing: 0.03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.readout ul.rel .d {
+  font-family: var(--mono); font-size: 0.55rem; color: var(--dim);
+  letter-spacing: 0.05em; text-transform: uppercase; justify-self: end;
+  /* The name is the thing you are reading — the note yields first. */
+  max-width: 44%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* One state dot vocabulary, shared by the readout's relation rows and the
+   command menu's results — a body means the same thing in both lists. */
+.readout .dot, .cmdk-list .dot {
+  width: 5px; height: 5px; border-radius: 50%; display: block;
+  justify-self: center; transform: translateY(-1px);
+}
+.readout .dot.ok,       .cmdk-list .dot.ok       { background: #b9d4e8; }
+.readout .dot.degraded, .cmdk-list .dot.degraded { background: #6d7f92; }
+.readout .dot.down,     .cmdk-list .dot.down     { background: transparent; box-shadow: inset 0 0 0 1px rgba(249,115,98,0.75); }
+.readout .dot.fading,   .cmdk-list .dot.fading   { background: rgba(185,212,232,0.28); }
+.readout .dot.reserved, .cmdk-list .dot.reserved { background: transparent; box-shadow: inset 0 0 0 1px rgba(129,140,248,0.55); }
+/* an action is not a body and does not get a state colour */
+.cmdk-list .dot.action { background: transparent; box-shadow: inset 0 0 0 1px var(--hair); }
+.readout .shellhead {
+  font-family: var(--mono); font-size: 0.53rem; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--dim); margin-top: 5px;
+}
+.readout .note {
+  font-family: var(--mono); font-size: 0.61rem; line-height: 1.65;
+  color: var(--muted);
+}
+.readout .note b { color: var(--indigo); font-weight: 500; }
+.readout .stations { display: flex; flex-wrap: wrap; gap: 4px; }
+.readout .stations span {
+  font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.05em;
+  color: var(--muted); border: 1px solid var(--hair);
+  border-radius: 2px; padding: 1px 5px;
+}
+.readout .stations span.down { color: var(--ember); border-color: rgba(249,115,98,0.38); }
+.readout .dismiss {
+  font-family: var(--mono); font-size: 0.55rem; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--dim);
+  background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
+}
+.readout .dismiss:hover { color: var(--muted); }
+.readout .dismiss:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+@media (max-width: 720px) {
+  .plate { max-width: 15rem; }
+  .legend, .hint { display: none; }
+}
+
+/* ── ⌘K instrument panel ──────────────────────────────────────────────
+   Debug/tuning surface. Same flat-matte language as the rest: hairline
+   borders, mono type, no blur or bevel. Hidden until summoned. */
+
+.cmdk {
+  position: absolute; z-index: 6;
+  top: 20px; left: 50%; transform: translateX(-50%) translateY(-6px);
+  width: min(380px, calc(100vw - 40px));
+  background: rgba(9, 13, 22, 0.95);
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  padding: 14px 16px 15px;
+  display: flex; flex-direction: column; gap: 13px;
+  opacity: 0;
+  transition: opacity .16s ease, transform .16s ease;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.cmdk[hidden] { display: none; }
+.cmdk.open { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.cmdk-head { display: flex; justify-content: space-between; align-items: center; }
+.cmdk-title {
+  font-size: 0.6rem; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--accent);
+}
+.cmdk-kbd {
+  font-size: 0.58rem; color: var(--dim);
+  border: 1px solid var(--hair); border-radius: 3px; padding: 1px 5px;
+}
+
+.fps-num { display: flex; align-items: baseline; gap: 6px; }
+.fps-num span { font-size: 1.85rem; font-weight: 500; color: var(--ice); line-height: 1; }
+.fps-num small { font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase;
+                 color: var(--dim); }
+.fps-meta {
+  display: flex; gap: 14px; margin-top: 5px;
+  font-size: 0.6rem; letter-spacing: 0.06em; color: var(--muted);
+}
+#fpsGraph {
+  display: block; width: 100%; height: 34px; margin-top: 8px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.cmdk-row { display: grid; grid-template-columns: 3.6rem 1fr 2.4rem; align-items: center;
+            gap: 9px; font-size: 0.62rem; letter-spacing: 0.08em;
+            text-transform: uppercase; color: var(--muted); }
+.cmdk-row output { color: var(--ice); text-align: right; text-transform: none; }
+.cmdk-row input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  height: 2px; background: var(--hair); border-radius: 2px; outline: none;
+}
+.cmdk-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
+.cmdk-row input[type="range"]::-moz-range-thumb {
+  width: 11px; height: 11px; border: none; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
+.cmdk-row input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* ── find / actions ──────────────────────────────────────────────────────
+   The roster is 78 lit bodies plus stations, and past about thirty things you
+   stop scanning and start hunting. Flat and matte like everything else: the
+   selected row is marked with an accent hairline on its leading edge, not a
+   fill, so the list reads as a chart legend rather than a web menu. */
+.cmdk-diag { display: flex; flex-direction: column; }
+.cmdk-diag .fps-num { margin-top: 11px; }
+
+.cmdk-find input {
+  width: 100%; box-sizing: border-box;
+  font: inherit; font-size: 0.72rem; letter-spacing: 0.04em;
+  background: rgba(255,255,255,0.028); color: var(--ice);
+  border: 1px solid var(--hair); border-radius: 5px;
+  padding: 7px 9px; outline: none;
+}
+.cmdk-find input::placeholder { color: var(--dim); letter-spacing: 0.06em; }
+.cmdk-find input:focus { border-color: rgba(56,189,248,0.45); }
+
+.cmdk-list { list-style: none; margin: 0; padding: 0; max-height: 246px; overflow-y: auto; }
+.cmdk-list:empty { display: none; }
+.cmdk-list li + li { margin-top: 1px; }
+.cmdk-list button {
+  display: grid; grid-template-columns: 9px 1fr auto; align-items: baseline; gap: 8px;
+  width: 100%; text-align: left; font: inherit; cursor: pointer;
+  background: none; border: 0; border-left: 2px solid transparent;
+  padding: 4px 6px 4px 7px; color: var(--muted);
+}
+.cmdk-list button .n { font-size: 0.68rem; color: var(--ice); letter-spacing: 0.03em; }
+.cmdk-list button .c {
+  font-size: 0.56rem; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--dim); text-align: right; white-space: nowrap;
+}
+/* The matched characters, so it is obvious WHY a row is in the list. */
+.cmdk-list button .n b { color: var(--accent); font-weight: 500; }
+/* Why this row matched, when the hit was in a field the row does not show —
+   searching "ad-block" and getting a host name is only confusing without it. */
+.cmdk-list button .why { color: var(--dim); font-size: 0.56rem; letter-spacing: 0.05em; }
+.cmdk-list button .dot { align-self: center; }
+.cmdk-list button:hover .n { color: #fff; }
+.cmdk-list li[aria-selected="true"] button {
+  border-left-color: var(--accent);
+  background: rgba(56,189,248,0.055);
+}
+.cmdk-list li[aria-selected="true"] .c { color: var(--muted); }
+.cmdk-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.cmdk-empty {
+  font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--dim); padding: 2px 0 1px;
+}
+.cmdk-empty[hidden] { display: none; }
+
+.cmdk-toggles { display: flex; flex-wrap: wrap; gap: 5px; }
+.cmdk-toggles button {
+  font: inherit; font-size: 0.58rem; letter-spacing: 0.07em; text-transform: uppercase;
+  background: none; color: var(--dim);
+  border: 1px solid var(--hair); border-radius: 4px;
+  padding: 3px 7px; cursor: pointer;
+  transition: color .12s ease, border-color .12s ease;
+}
+.cmdk-toggles button[aria-pressed="true"] { color: var(--ice); border-color: rgba(56,189,248,0.45); }
+.cmdk-toggles button:hover { color: var(--ice); }
+.cmdk-toggles button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.cmdk-stats {
+  margin: 0; display: grid; grid-template-columns: auto 1fr auto 1fr auto 1fr;
+  gap: 0 6px; font-size: 0.58rem; letter-spacing: 0.06em;
+  border-top: 1px solid var(--hair); padding-top: 10px;
+}
+.cmdk-stats dt { color: var(--dim); text-transform: uppercase; white-space: nowrap; }
+.cmdk-stats dd { margin: 0; color: var(--muted); white-space: nowrap; }
+
+/* Three of these stats are a word and a number and pack three to a row. Two are
+   not: "back/body/over" is a long label whose value is three numbers that mean
+   nothing apart, and it was landing in a 1fr column narrow enough to break at
+   every slash — the frame cost read as a vertical list of unrelated figures.
+   Give those their own row, label in the first column and value across the
+   rest. */
+.cmdk-stats dt.wide { grid-column: 1; }
+.cmdk-stats dd.wide { grid-column: 2 / -1; }
+
+/* Held: the epoch readout says HOLD, and the whole plate cools slightly so the
+   state is legible from across the room without adding a badge. */
+.orrery.paused .plate p { color: var(--accent); }
