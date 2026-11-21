@@ -1339,15 +1339,15 @@
       }
       const q = at(k);
       const tg = ov.createLinearGradient(q.x, q.y, at(Math.max(0, k - 0.28)).x, at(Math.max(0, k - 0.28)).y);
-      tg.addColorStop(0, sh.hue + "ee"); tg.addColorStop(1, sh.hue + "00");
-      ov.strokeStyle = tg; ov.lineWidth = 1.6; ov.stroke();
-      // craft — subtle colored glow + crisp point so multi-hue traffic reads cleanly
+      tg.addColorStop(0, sh.hue + "99"); tg.addColorStop(1, sh.hue + "00");
+      ov.strokeStyle = tg; ov.lineWidth = 1.15; ov.stroke();
+      // craft — subtle muted astronomical glow + crisp pinpoint
       sh._scr = { x: q.x, y: q.y };
       const selShip = selected === "ship:" + sh.id;
-      ov.fillStyle = sh.hue + "38";
-      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 7.5 : 4.8, 0, TAU); ov.fill();
+      ov.fillStyle = sh.hue + "1e";
+      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 6.5 : 3.8, 0, TAU); ov.fill();
       ov.fillStyle = sh.hue;
-      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 3.4 : 2.1, 0, TAU); ov.fill();
+      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 3.0 : 1.75, 0, TAU); ov.fill();
       if (selShip) {
         ov.strokeStyle = "rgba(56,189,248,0.75)"; ov.lineWidth = 1;
         ov.beginPath(); ov.arc(q.x, q.y, 11, 0, TAU); ov.stroke();

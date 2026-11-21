@@ -724,63 +724,63 @@ const SYS = (_SYNC && Array.isArray(_SYNC.hosts) && _SYNC.hosts.length)
 
 /* ── Ships: discrete, scheduled transfers. ───────────────────────────── */
 const SHIPS = (_SYNC && Array.isArray(_SYNC.hosts) && _SYNC.hosts.length) ? [] : [
-  { id:"mcp-gateway", from:"charon", to:"europa", period: 9, phase: 1.5, hue:"#a78bfa", corridor:true,
+  { id:"mcp-gateway", from:"charon", to:"europa", period: 9, phase: 1.5, hue:"#969fe8", corridor:true,
     label:"mcp gateway", cadence:"on demand",
     desc:"Scoped agent tool calls crossing from the perimeter edge through a WireGuard ACL into Europa's outer gateway ring.",
     spec:[["route","Charon → Gateway @ Europa"],["transport","WireGuard"],
           ["policy","HITL approval gate"]] },
 
-  { id:"mcp-verdict", from:"europa", to:"charon", period: 13, phase: 6.0, hue:"#818cf8",
+  { id:"mcp-verdict", from:"europa", to:"charon", period: 13, phase: 6.0, hue:"#b1a2dc",
     label:"tool verdict", cadence:"on demand",
     desc:"Approved MCP responses and audit receipts returning across the gateway boundary.",
     spec:[["route","Gateway @ Europa → Charon"],["audit","append-only log"]] },
 
-  { id:"backup-sync", from:"europa", to:"ceres", period: 16, phase: 3.5, hue:"#38bdf8",
+  { id:"backup-sync", from:"europa", to:"ceres", period: 16, phase: 3.5, hue:"#9bc8e4",
     label:"restic snapshot", cadence:"nightly",
     desc:"Incremental encrypted snapshots of container volumes and PostgreSQL dumps pushed to Ceres's ZFS pool.",
     spec:[["route","Europa → Restic @ Ceres"],["transport","10 GbE LAN"],["retention","7d / 4w / 12m"]] },
 
-  { id:"offsite-archive", from:"ceres", to:"polaris", period: 28, phase: 9.0, hue:"#fbbf24",
+  { id:"offsite-archive", from:"ceres", to:"polaris", period: 28, phase: 9.0, hue:"#e2c496",
     label:"off-site backup", cadence:"every 6h",
     desc:"Encrypted backup chunks replicated past the heliopause to off-site object storage so a local failure never means data loss.",
     spec:[["cadence","every 6 hours"],["encryption","client-side AES-256"],["target","beyond heliopause"]] },
 
-  { id:"gpu-inference", from:"europa", to:"mercury", period: 10, phase: 4.2, hue:"#fb923c",
+  { id:"gpu-inference", from:"europa", to:"mercury", period: 10, phase: 4.2, hue:"#d9a37c",
     label:"llm inference", cadence:"on demand",
     desc:"Local embedding, transcription, and LLM requests routed from Europa services to Mercury's GPU box.",
     spec:[["route","Europa → Ollama @ Mercury"],["transport","10 GbE LAN"]] },
 
-  { id:"metrics-push", from:"mercury", to:"europa", period: 14, phase: 10.1, hue:"#34d399",
+  { id:"metrics-push", from:"mercury", to:"europa", period: 14, phase: 10.1, hue:"#8ac2ad",
     label:"gpu telemetry", cadence:"continuous",
     desc:"Mercury exports GPU thermals, VRAM utilization, and inference latency metrics to Prometheus on Europa.",
     spec:[["route","Mercury → Prometheus @ Europa"],["metrics","DCGM + node_exporter"]] },
 
-  { id:"ci-deploy", from:"ceres", to:"europa", period: 20, phase: 11.4, hue:"#2dd4bf",
+  { id:"ci-deploy", from:"ceres", to:"europa", period: 20, phase: 11.4, hue:"#83bab8",
     label:"forgejo runner", cadence:"on push",
     desc:"Builds container images from Forgejo repositories and rolls out updated Compose stacks on Europa.",
     spec:[["route","Forgejo @ Ceres → Europa"],["trigger","main branch push"]] },
 
-  { id:"mqtt-events", from:"vesta", to:"europa", period: 11, phase: 7.3, hue:"#4ade80",
+  { id:"mqtt-events", from:"vesta", to:"europa", period: 11, phase: 7.3, hue:"#9cc49e",
     label:"mqtt telemetry", cadence:"continuous",
     desc:"Home Assistant & Zigbee2MQTT sensor events streaming from Vesta into Europa's observability stack.",
     spec:[["route","Vesta → Mosquitto @ Europa"],["protocol","MQTT over TLS"]] },
 
-  { id:"media-stream", from:"ceres", to:"pallas", period: 15, phase: 2.1, hue:"#f472b6",
+  { id:"media-stream", from:"ceres", to:"pallas", period: 15, phase: 2.1, hue:"#cc9cb4",
     label:"media feed", cadence:"on demand",
     desc:"High-bitrate media libraries mounted read-only from Ceres into Pallas for QuickSync hardware transcoding.",
     spec:[["route","Ceres ZFS → Pallas"],["mount","NFSv4 read-only"]] },
 
-  { id:"firewall-logs", from:"ganymede", to:"europa", period: 12, phase: 8.6, hue:"#fb7185",
+  { id:"firewall-logs", from:"ganymede", to:"europa", period: 12, phase: 8.6, hue:"#cf9599",
     label:"syslog stream", cadence:"continuous",
     desc:"OPNsense perimeter firewall logs forwarded from Ganymede into Loki on Europa.",
     spec:[["route","Ganymede → Loki @ Europa"],["protocol","syslog TLS"]] },
 
-  { id:"zfs-mirror", from:"jupiter", to:"ceres", period: 22, phase: 14.0, hue:"#22d3ee",
+  { id:"zfs-mirror", from:"jupiter", to:"ceres", period: 22, phase: 14.0, hue:"#8fbcd4",
     label:"vm snapshot", cadence:"hourly",
     desc:"Proxmox ZFS send/recv snapshots replicating VM disks from Jupiter to Ceres's RAIDZ2 pool.",
     spec:[["route","Jupiter → Ceres"],["transport","ZFS send/recv"]] },
 
-  { id:"status-probe", from:"polaris", to:"ganymede", period: 17, phase: 5.5, hue:"#fde047",
+  { id:"status-probe", from:"polaris", to:"ganymede", period: 17, phase: 5.5, hue:"#dcd19c",
     label:"edge probe", cadence:"every 60s",
     desc:"External uptime and TLS expiry probes reaching back across the heliopause to verify public ingress.",
     spec:[["route","Polaris → Ganymede"],["checks","HTTPS + TLS expiry"]] },
@@ -5274,15 +5274,15 @@ const FS = `
       }
       const q = at(k);
       const tg = ov.createLinearGradient(q.x, q.y, at(Math.max(0, k - 0.28)).x, at(Math.max(0, k - 0.28)).y);
-      tg.addColorStop(0, sh.hue + "ee"); tg.addColorStop(1, sh.hue + "00");
-      ov.strokeStyle = tg; ov.lineWidth = 1.6; ov.stroke();
-      // craft — subtle colored glow + crisp point so multi-hue traffic reads cleanly
+      tg.addColorStop(0, sh.hue + "99"); tg.addColorStop(1, sh.hue + "00");
+      ov.strokeStyle = tg; ov.lineWidth = 1.15; ov.stroke();
+      // craft — subtle muted astronomical glow + crisp pinpoint
       sh._scr = { x: q.x, y: q.y };
       const selShip = selected === "ship:" + sh.id;
-      ov.fillStyle = sh.hue + "38";
-      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 7.5 : 4.8, 0, TAU); ov.fill();
+      ov.fillStyle = sh.hue + "1e";
+      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 6.5 : 3.8, 0, TAU); ov.fill();
       ov.fillStyle = sh.hue;
-      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 3.4 : 2.1, 0, TAU); ov.fill();
+      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 3.0 : 1.75, 0, TAU); ov.fill();
       if (selShip) {
         ov.strokeStyle = "rgba(56,189,248,0.75)"; ov.lineWidth = 1;
         ov.beginPath(); ov.arc(q.x, q.y, 11, 0, TAU); ov.stroke();
