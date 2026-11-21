@@ -724,31 +724,66 @@ const SYS = (_SYNC && Array.isArray(_SYNC.hosts) && _SYNC.hosts.length)
 
 /* ── Ships: discrete, scheduled transfers. ───────────────────────────── */
 const SHIPS = (_SYNC && Array.isArray(_SYNC.hosts) && _SYNC.hosts.length) ? [] : [
-  { id:"edge-tunnel", from:"charon", to:"europa", period: 11, hue:"#818cf8", corridor:true,
-    label:"wireguard ingress", cadence:"on demand",
-    desc:"The only traffic Charon is permitted to originate. A WireGuard ACL allows a single lane to Europa's outer gateway ring.",
+  { id:"mcp-gateway", from:"charon", to:"europa", period: 9, phase: 1.5, hue:"#a78bfa", corridor:true,
+    label:"mcp gateway", cadence:"on demand",
+    desc:"Scoped agent tool calls crossing from the perimeter edge through a WireGuard ACL into Europa's outer gateway ring.",
     spec:[["route","Charon → Gateway @ Europa"],["transport","WireGuard"],
-          ["policy","strict ingress allowlist"]] },
+          ["policy","HITL approval gate"]] },
 
-  { id:"backup-sync", from:"europa", to:"ceres", period: 24, hue:"#cfe3f2",
+  { id:"mcp-verdict", from:"europa", to:"charon", period: 13, phase: 6.0, hue:"#818cf8",
+    label:"tool verdict", cadence:"on demand",
+    desc:"Approved MCP responses and audit receipts returning across the gateway boundary.",
+    spec:[["route","Gateway @ Europa → Charon"],["audit","append-only log"]] },
+
+  { id:"backup-sync", from:"europa", to:"ceres", period: 16, phase: 3.5, hue:"#38bdf8",
     label:"restic snapshot", cadence:"nightly",
     desc:"Incremental encrypted snapshots of container volumes and PostgreSQL dumps pushed to Ceres's ZFS pool.",
     spec:[["route","Europa → Restic @ Ceres"],["transport","10 GbE LAN"],["retention","7d / 4w / 12m"]] },
 
-  { id:"ci-deploy", from:"ceres", to:"europa", period: 36, hue:"#cfe3f2",
+  { id:"offsite-archive", from:"ceres", to:"polaris", period: 28, phase: 9.0, hue:"#fbbf24",
+    label:"off-site backup", cadence:"every 6h",
+    desc:"Encrypted backup chunks replicated past the heliopause to off-site object storage so a local failure never means data loss.",
+    spec:[["cadence","every 6 hours"],["encryption","client-side AES-256"],["target","beyond heliopause"]] },
+
+  { id:"gpu-inference", from:"europa", to:"mercury", period: 10, phase: 4.2, hue:"#fb923c",
+    label:"llm inference", cadence:"on demand",
+    desc:"Local embedding, transcription, and LLM requests routed from Europa services to Mercury's GPU box.",
+    spec:[["route","Europa → Ollama @ Mercury"],["transport","10 GbE LAN"]] },
+
+  { id:"metrics-push", from:"mercury", to:"europa", period: 14, phase: 10.1, hue:"#34d399",
+    label:"gpu telemetry", cadence:"continuous",
+    desc:"Mercury exports GPU thermals, VRAM utilization, and inference latency metrics to Prometheus on Europa.",
+    spec:[["route","Mercury → Prometheus @ Europa"],["metrics","DCGM + node_exporter"]] },
+
+  { id:"ci-deploy", from:"ceres", to:"europa", period: 20, phase: 11.4, hue:"#2dd4bf",
     label:"forgejo runner", cadence:"on push",
     desc:"Builds container images from Forgejo repositories and rolls out updated Compose stacks on Europa.",
     spec:[["route","Forgejo @ Ceres → Europa"],["trigger","main branch push"]] },
 
-  { id:"metrics-push", from:"mercury", to:"europa", period: 18, hue:"#8fa6bd",
-    label:"metrics export", cadence:"continuous",
-    desc:"Mercury exports GPU thermals, VRAM utilization, and inference latency metrics to Prometheus on Europa.",
-    spec:[["route","Mercury → Prometheus @ Europa"],["metrics","DCGM + node_exporter"]] },
+  { id:"mqtt-events", from:"vesta", to:"europa", period: 11, phase: 7.3, hue:"#4ade80",
+    label:"mqtt telemetry", cadence:"continuous",
+    desc:"Home Assistant & Zigbee2MQTT sensor events streaming from Vesta into Europa's observability stack.",
+    spec:[["route","Vesta → Mosquitto @ Europa"],["protocol","MQTT over TLS"]] },
 
-  { id:"offsite-archive", from:"ceres", to:"polaris", period: 58, hue:"#ffd9a8",
-    label:"off-site backup", cadence:"every 6h",
-    desc:"Encrypted backup chunks replicated past the heliopause to off-site object storage so a local failure never means data loss.",
-    spec:[["cadence","every 6 hours"],["encryption","client-side AES-256"],["target","beyond heliopause"]] },
+  { id:"media-stream", from:"ceres", to:"pallas", period: 15, phase: 2.1, hue:"#f472b6",
+    label:"media feed", cadence:"on demand",
+    desc:"High-bitrate media libraries mounted read-only from Ceres into Pallas for QuickSync hardware transcoding.",
+    spec:[["route","Ceres ZFS → Pallas"],["mount","NFSv4 read-only"]] },
+
+  { id:"firewall-logs", from:"ganymede", to:"europa", period: 12, phase: 8.6, hue:"#fb7185",
+    label:"syslog stream", cadence:"continuous",
+    desc:"OPNsense perimeter firewall logs forwarded from Ganymede into Loki on Europa.",
+    spec:[["route","Ganymede → Loki @ Europa"],["protocol","syslog TLS"]] },
+
+  { id:"zfs-mirror", from:"jupiter", to:"ceres", period: 22, phase: 14.0, hue:"#22d3ee",
+    label:"vm snapshot", cadence:"hourly",
+    desc:"Proxmox ZFS send/recv snapshots replicating VM disks from Jupiter to Ceres's RAIDZ2 pool.",
+    spec:[["route","Jupiter → Ceres"],["transport","ZFS send/recv"]] },
+
+  { id:"status-probe", from:"polaris", to:"ganymede", period: 17, phase: 5.5, hue:"#fde047",
+    label:"edge probe", cadence:"every 60s",
+    desc:"External uptime and TLS expiry probes reaching back across the heliopause to verify public ingress.",
+    spec:[["route","Polaris → Ganymede"],["checks","HTTPS + TLS expiry"]] },
 ];
 
 /* ── Reserved names holding empty orbits. ────────────────────────────── */
@@ -5216,9 +5251,9 @@ const FS = `
     if (CFG.ships) for (const sh of SHIPS) {
       const A = byId[sh.from], B = byId[sh.to];
       if (!A || !B) continue;
-      const u = (t % sh.period) / sh.period;
-      if (u > 0.72) { sh._scr = null; continue; }   // in dock the rest of the cycle
-      const k = u / 0.72;
+      const u = ((((t + (sh.phase || 0)) % sh.period) + sh.period) % sh.period) / sh.period;
+      if (u > 0.78) { sh._scr = null; continue; }   // in dock the rest of the cycle
+      const k = u / 0.78;
       const p0 = toScreen(A.pos.x, A.pos.y), p1 = toScreen(B.pos.x, B.pos.y);
       // bowed transfer arc, not a straight line
       const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
@@ -5233,19 +5268,21 @@ const FS = `
       // ion trail
       ov.beginPath();
       for (let i = 0; i <= 22; i++) {
-        const s = Math.max(0, k - (i / 22) * 0.26);
+        const s = Math.max(0, k - (i / 22) * 0.28);
         const p = at(s);
         i ? ov.lineTo(p.x, p.y) : ov.moveTo(p.x, p.y);
       }
       const q = at(k);
-      const tg = ov.createLinearGradient(q.x, q.y, at(Math.max(0, k - 0.26)).x, at(Math.max(0, k - 0.26)).y);
-      tg.addColorStop(0, sh.hue + "cc"); tg.addColorStop(1, sh.hue + "00");
-      ov.strokeStyle = tg; ov.lineWidth = 1.2; ov.stroke();
-      // craft — remember it so it can be picked and selected
+      const tg = ov.createLinearGradient(q.x, q.y, at(Math.max(0, k - 0.28)).x, at(Math.max(0, k - 0.28)).y);
+      tg.addColorStop(0, sh.hue + "ee"); tg.addColorStop(1, sh.hue + "00");
+      ov.strokeStyle = tg; ov.lineWidth = 1.6; ov.stroke();
+      // craft — subtle colored glow + crisp point so multi-hue traffic reads cleanly
       sh._scr = { x: q.x, y: q.y };
       const selShip = selected === "ship:" + sh.id;
+      ov.fillStyle = sh.hue + "38";
+      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 7.5 : 4.8, 0, TAU); ov.fill();
       ov.fillStyle = sh.hue;
-      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 3.2 : 1.7, 0, TAU); ov.fill();
+      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 3.4 : 2.1, 0, TAU); ov.fill();
       if (selShip) {
         ov.strokeStyle = "rgba(56,189,248,0.75)"; ov.lineWidth = 1;
         ov.beginPath(); ov.arc(q.x, q.y, 11, 0, TAU); ov.stroke();

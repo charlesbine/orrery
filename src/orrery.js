@@ -1316,9 +1316,9 @@
     if (CFG.ships) for (const sh of SHIPS) {
       const A = byId[sh.from], B = byId[sh.to];
       if (!A || !B) continue;
-      const u = (t % sh.period) / sh.period;
-      if (u > 0.72) { sh._scr = null; continue; }   // in dock the rest of the cycle
-      const k = u / 0.72;
+      const u = ((((t + (sh.phase || 0)) % sh.period) + sh.period) % sh.period) / sh.period;
+      if (u > 0.78) { sh._scr = null; continue; }   // in dock the rest of the cycle
+      const k = u / 0.78;
       const p0 = toScreen(A.pos.x, A.pos.y), p1 = toScreen(B.pos.x, B.pos.y);
       // bowed transfer arc, not a straight line
       const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
@@ -1333,19 +1333,21 @@
       // ion trail
       ov.beginPath();
       for (let i = 0; i <= 22; i++) {
-        const s = Math.max(0, k - (i / 22) * 0.26);
+        const s = Math.max(0, k - (i / 22) * 0.28);
         const p = at(s);
         i ? ov.lineTo(p.x, p.y) : ov.moveTo(p.x, p.y);
       }
       const q = at(k);
-      const tg = ov.createLinearGradient(q.x, q.y, at(Math.max(0, k - 0.26)).x, at(Math.max(0, k - 0.26)).y);
-      tg.addColorStop(0, sh.hue + "cc"); tg.addColorStop(1, sh.hue + "00");
-      ov.strokeStyle = tg; ov.lineWidth = 1.2; ov.stroke();
-      // craft — remember it so it can be picked and selected
+      const tg = ov.createLinearGradient(q.x, q.y, at(Math.max(0, k - 0.28)).x, at(Math.max(0, k - 0.28)).y);
+      tg.addColorStop(0, sh.hue + "ee"); tg.addColorStop(1, sh.hue + "00");
+      ov.strokeStyle = tg; ov.lineWidth = 1.6; ov.stroke();
+      // craft — subtle colored glow + crisp point so multi-hue traffic reads cleanly
       sh._scr = { x: q.x, y: q.y };
       const selShip = selected === "ship:" + sh.id;
+      ov.fillStyle = sh.hue + "38";
+      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 7.5 : 4.8, 0, TAU); ov.fill();
       ov.fillStyle = sh.hue;
-      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 3.2 : 1.7, 0, TAU); ov.fill();
+      ov.beginPath(); ov.arc(q.x, q.y, selShip ? 3.4 : 2.1, 0, TAU); ov.fill();
       if (selShip) {
         ov.strokeStyle = "rgba(56,189,248,0.75)"; ov.lineWidth = 1;
         ov.beginPath(); ov.arc(q.x, q.y, 11, 0, TAU); ov.stroke();
