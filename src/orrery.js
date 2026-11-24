@@ -1388,9 +1388,12 @@
       // entire viewport and dimmed the whole map. Anchored to the element, it
       // can only ever cover the text.
       const rd = readout.getBoundingClientRect();
+      // Keep the annotation inside small viewports without moving its body.
+      const rx = Math.max(16, Math.min(tx, W - rd.width - 16));
+      const ry = Math.max(16, Math.min(ey - 9, H - rd.height - 16));
       if (rd.width) {
         readoutSize = { w: rd.width, h: rd.height };
-        readoutBox = { x: (flip ? tx - rd.width : tx) - 14, y: ey - 9 - 9,
+        readoutBox = { x: rx - 14, y: ry - 9,
                        w: rd.width + 28, h: rd.height + 18 };
       }
 
@@ -1410,12 +1413,12 @@
       }
       // leader out to the type
       ov.beginPath();
-      ov.moveTo(ax, ay); ov.lineTo(ex, ey); ov.lineTo(tx, ey);
+      ov.moveTo(ax, ay); ov.lineTo(ex, ey); ov.lineTo(rx, ry + 9);
       ov.stroke();
 
       readout.classList.toggle("flip", flip);
-      readout.style.left = (flip ? tx - rd.width : tx) + "px";
-      readout.style.top  = (ey - 9) + "px";
+      readout.style.left = rx + "px";
+      readout.style.top  = ry + "px";
     }
 
     /* ── labels: star-atlas convention, leader line + offset text ──── */

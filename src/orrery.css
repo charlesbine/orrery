@@ -306,6 +306,21 @@ html { background: var(--void); }
 @media (max-width: 720px) {
   .plate { max-width: 15rem; }
   .legend, .hint { display: none; }
+  .readout, .readout.wide {
+    box-sizing: border-box;
+    width: min(282px, calc(100vw - 32px));
+    --readout-w: 268px;
+    grid-template-columns: 1fr;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #465665 transparent;
+    overflow-wrap: anywhere;
+  }
+  .readout::before { inset: 0; }
+  .readout.wide .col-b { border-left: 0; padding-left: 0; }
+  .readout.wide .relgroups { column-count: 1; }
 }
 
 /* ── ⌘K instrument panel ──────────────────────────────────────────────
