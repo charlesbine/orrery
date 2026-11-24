@@ -9,11 +9,14 @@ const { execFileSync } = require("node:child_process");
 
 const {
   parseComposeServices,
+  parseComposeIncludes,
   parseDynamicRouters,
   parseGatusEndpoints,
   normalizeConfig,
   generateRoster,
   importTailscale,
+  findReplacedInput,
+  syncOnce,
 } = require("../dev/sync.js");
 const { solveLayout } = require("../dev/layout.js");
 
@@ -221,6 +224,134 @@ endpoints:
     const eps = parseGatusEndpoints("endpoints:\n  - group: G1\n    name: E1\n  - name: 'E2'\n    group: \"G2\"\n");
     assert.equal(eps.has("G1\u0000E1"), true);
     assert.equal(eps.has("G2\u0000E2"), true);
+  });
+
+  it("follows root docker-compose include: entries and warns on unlisted files", () => {
+    const dir = makeTmpDir();
+    fs.writeFileSync(path.join(dir, "docker-compose.yml"), `
+include:
+  - ./compose.apps.yml
+  - path: "compose.extra.yml"
+`);
+    fs.writeFileSync(path.join(dir, "compose.apps.yml"), `
+services:
+  immich:
+    image: immich
+    labels:
+      traefik.http.routers.immich.rule: Host(\`photos.lab.test\`)
+`);
+    fs.writeFileSync(path.join(dir, "compose.extra.yml"), `
+services:
+  vault:
+    image: vaultwarden
+    labels:
+      - "traefik.http.routers.vault.rule=Host(\`vault.lab.test\`)"
+`);
+
+    assert.deepEqual(
+      parseComposeIncludes(fs.readFileSync(path.join(dir, "docker-compose.yml"), "utf8")),
+      ["compose.apps.yml", "compose.extra.yml"]
+    );
+
+    const cfg = {
+      version: 2,
+      defaultHost: "alpha",
+      discovery: {
+        composeInclude: "docker-compose.yml",
+        defaultComposeShell: "misc",
+        composeFiles: [
+          { path: "compose.apps.yml", shell: "apps" },
+          { path: "compose.unused.yml", shell: "ops" },
+        ],
+      },
+    };
+    const res = generateRoster(cfg, { root: dir });
+    assert.deepEqual(
+      res.services.map(s => [s.name, s.shell]),
+      [["immich", "apps"], ["vault", "misc"]]
+    );
+    assert.equal(res.warnings.length, 2);
+    assert.match(res.warnings[0], /compose\.extra\.yml has no entry/);
+    assert.match(res.warnings[1], /compose\.unused\.yml/);
+  });
+
+  it("skips individual bad items with warnings in tolerant mode and writes sync-status.json", () => {
+    const dir = makeTmpDir();
+    fs.writeFileSync(path.join(dir, "compose.apps.yml"), `
+services:
+  grafana:
+    image: grafana/grafana
+    labels:
+      - "traefik.http.routers.grafana.rule=Host(\`grafana.lab.test\`)"
+`);
+    fs.writeFileSync(path.join(dir, "traefik.yml"), `
+http:
+  routers:
+    unmapped-route:
+      rule: "Host(\`mystery.lab.test\`)"
+    conflict-route:
+      rule: "Host(\`grafana-alt.lab.test\`)"
+`);
+    fs.writeFileSync(path.join(dir, "gatus.yaml"), `
+endpoints:
+  - group: Ops
+    name: grafana
+`);
+    const cfgPath = path.join(dir, "orrery.config.json");
+    const outPath = path.join(dir, "services.generated.js");
+    const statusPath = path.join(dir, "sync-status.json");
+    const cfg = {
+      version: 2,
+      defaultHost: "alpha",
+      composeFiles: [
+        { path: "compose.apps.yml", shell: "ops" },
+        { path: "compose.missing.yml", shell: "apps" },
+      ],
+      dynamicTraefikFile: "traefik.yml",
+      gatusFile: "gatus.yaml",
+      sourceOverrides: {
+        "dynamic:conflict-route": { product: "grafana", host: "beta", shell: "apps" },
+      },
+      extraProducts: [
+        { product: "grafana", host: "alpha", shell: "ops" },
+      ],
+      productOverrides: {
+        grafana: { health: [["Ops", "grafana"], ["Ops", "missing-probe"]] },
+      },
+    };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+    const res = syncOnce({
+      config: cfgPath,
+      root: dir,
+      output: outPath,
+      statusPath,
+      tolerant: true,
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.count, 1);
+    assert.equal(res.warnings.length, 5);
+    assert.deepEqual(res.result.services[0].health, [["Ops", "grafana"]]);
+
+    const status = JSON.parse(fs.readFileSync(statusPath, "utf8"));
+    assert.equal(status.ok, true);
+    assert.equal(status.products, 1);
+    assert.equal(status.warnings.length, 5);
+    assert.ok(status.checkedAt);
+
+    // Existing inputs are not flagged as replaced (nlink > 0).
+    assert.equal(findReplacedInput(cfgPath, dir), null);
+
+    // --check fails when warnings exist even if output matches.
+    const checkRes = syncOnce({
+      config: cfgPath,
+      root: dir,
+      output: outPath,
+      check: true,
+      tolerant: true,
+    });
+    assert.equal(checkRes.ok, false);
+    assert.equal(checkRes.warnings.length, 5);
   });
 });
 

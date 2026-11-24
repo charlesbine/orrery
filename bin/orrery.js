@@ -31,8 +31,10 @@ Usage:
     --fleet <file>                   Optional fleet.js used when solving layout
     --solve-layout                   Force orbit solve against --fleet even without config.hosts
     --check                          Exit non-zero if output would change
-    --watch                          Re-sync continuously (for networkless sidecar)
+    --tolerant                       Skip invalid routes/files with warnings instead of aborting (default in --watch)
+    --watch                          Re-sync continuously (for networkless sidecar; never crash-loops on bad config)
     --interval <sec>                 Watch interval in seconds (default: 30)
+    --status <file>                  Write sync-status.json (default in --watch: beside --output)
     --heartbeat <file>               Heartbeat file touched on sync ticks (default in --watch: /tmp/.orrery-sync-heartbeat)
 
   orrery import --tailscale [opts]   Bootstrap hosts & trust rings from Tailscale status JSON
