@@ -226,6 +226,18 @@ function parseGatusEndpoints(text) {
   return found;
 }
 
+function parseComposeIncludes(text) {
+  const found = [];
+  let inInclude = false;
+  for (const line of String(text || "").split(/\r?\n/)) {
+    if (/^include:\s*(?:#.*)?$/.test(line)) { inInclude = true; continue; }
+    if (inInclude && /^\S/.test(line) && line.trim() && !line.startsWith("#")) break;
+    const item = line.match(/^\s+-\s+(?:path:\s*)?['"]?(?:\.\/)?([^'"\s#]+\.ya?ml)['"]?\s*(?:#.*)?$/);
+    if (inInclude && item) found.push(item[1]);
+  }
+  return found;
+}
+
 function normalizeConfig(raw) {
   const version = raw.version ?? 2;
   if (version !== 1 && version !== 2)
@@ -233,6 +245,11 @@ function normalizeConfig(raw) {
 
   const discovery = raw.discovery || {};
   const composeFiles = discovery.composeFiles || raw.composeFiles || [];
+  const composeInclude = discovery.composeInclude !== undefined
+    ? discovery.composeInclude : (raw.composeInclude ?? null);
+  const defaultComposeShell = discovery.defaultComposeShell !== undefined
+    ? discovery.defaultComposeShell : (raw.defaultComposeShell ?? null);
+  const tolerant = Boolean(discovery.tolerant ?? raw.tolerant ?? false);
   const defaultMode = discovery.mode || raw.mode || "routed";
   const dynamicTraefikFile = discovery.dynamicTraefikFile !== undefined
     ? discovery.dynamicTraefikFile : (raw.dynamicTraefikFile ?? null);
@@ -252,6 +269,9 @@ function normalizeConfig(raw) {
     defaultHost,
     defaultMode,
     composeFiles,
+    composeInclude,
+    defaultComposeShell,
+    tolerant,
     dynamicTraefikFile,
     gatusFile,
     fleet,
@@ -277,15 +297,44 @@ function readOptionalFile(rootDir, relPath) {
   return fs.readFileSync(full, "utf8");
 }
 
+function resolveComposeFiles(config, rootDir, warnings) {
+  const listed = config.composeFiles || [];
+  if (!config.composeInclude) return listed;
+  const text = readOptionalFile(rootDir, config.composeInclude);
+  if (text === null) {
+    warnings.push(`${config.composeInclude} is not mounted or does not exist; falling back to composeFiles`);
+    return listed;
+  }
+  const byPath = new Map(listed.map(entry => {
+    const filePath = typeof entry === "string" ? entry : entry.path;
+    return [filePath, typeof entry === "string" ? { path: entry } : entry];
+  }));
+  const included = parseComposeIncludes(text);
+  const fallbackShell = config.defaultComposeShell || null;
+  const resolved = included.map(filePath => {
+    if (byPath.has(filePath)) return byPath.get(filePath);
+    warnings.push(`${filePath} has no entry in composeFiles; using ${fallbackShell || "no shell"}`);
+    return { path: filePath, shell: fallbackShell };
+  });
+  for (const filePath of byPath.keys()) {
+    if (!included.includes(filePath)) {
+      warnings.push(`composeFiles lists ${filePath}, which ${config.composeInclude} does not include`);
+    }
+  }
+  return resolved;
+}
+
 /**
  * Generate the logical product roster and optional solved layout metadata.
  */
 function generateRoster(rawConfig, options = {}) {
   const config = normalizeConfig(rawConfig);
+  const tolerant = Boolean(options.tolerant ?? config.tolerant);
   const rootDir = path.resolve(options.root || process.cwd());
+  const warnings = [];
   const sources = [];
 
-  for (const entry of config.composeFiles) {
+  for (const entry of resolveComposeFiles(config, rootDir, warnings)) {
     const filePath = typeof entry === "string" ? entry : entry.path;
     const host = (typeof entry === "object" && entry.host) || config.defaultHost;
     const shell = (typeof entry === "object" && entry.shell) || null;
@@ -295,6 +344,10 @@ function generateRoster(rawConfig, options = {}) {
 
     if (!fs.existsSync(full)) {
       if (optional) continue;
+      if (tolerant) {
+        warnings.push(`${filePath} is not mounted or does not exist; its services are missing`);
+        continue;
+      }
       throw new Error(`compose file not found: ${full}`);
     }
     const text = fs.readFileSync(full, "utf8");
@@ -336,11 +389,19 @@ function generateRoster(rawConfig, options = {}) {
     const override = config.sourceOverrides[source.source] || {};
     const item = { ...source, ...override };
     if (!item.host) {
+      if (tolerant) {
+        warnings.push(`${source.source} has no host; set composeFiles[].host, defaultHost, or add a sourceOverride / exclude it (skipped)`);
+        continue;
+      }
       throw new Error(`${source.source} has no host; set composeFiles[].host, defaultHost, or add a sourceOverride / exclude it`);
     }
     const existing = products.get(item.product);
     if (existing) {
       if (existing.host !== item.host || (existing.shell || null) !== (item.shell || null)) {
+        if (tolerant) {
+          warnings.push(`${item.source} disagrees with ${existing.sources[0]} on host or shell for ${item.product} (skipped)`);
+          continue;
+        }
         throw new Error(`${item.product} sources disagree on host or shell`);
       }
       if (!existing.sources.includes(item.source)) existing.sources.push(item.source);
@@ -359,8 +420,13 @@ function generateRoster(rawConfig, options = {}) {
   }
 
   for (const extra of config.extraProducts) {
-    if (products.has(extra.product))
+    if (products.has(extra.product)) {
+      if (tolerant) {
+        warnings.push(`extra product ${extra.product} is already discovered (skipped)`);
+        continue;
+      }
       throw new Error(`extra product ${extra.product} is already discovered`);
+    }
     products.set(extra.product, {
       ...extra,
       name: extra.name || extra.product,
@@ -379,13 +445,15 @@ function generateRoster(rawConfig, options = {}) {
   const services = [...products.values()].map(item => {
     const override = config.productOverrides[item.product] || {};
     const row = { ...item, ...override };
-    row.health = row.health || [];
-    if (knownHealth && row.health.length) {
-      for (const ref of row.health) {
-        if (!knownHealth.has(`${ref[0]}\u0000${ref[1]}`))
-          unknownHealth.push(`${item.product}: ${ref[0]} / ${ref[1]}`);
+    row.health = (row.health || []).filter(ref => {
+      if (!knownHealth || knownHealth.has(`${ref[0]}\u0000${ref[1]}`)) return true;
+      if (tolerant) {
+        warnings.push(`${item.product} references missing Gatus endpoint ${ref[0]} / ${ref[1]} (dropped)`);
+        return false;
       }
-    }
+      unknownHealth.push(`${item.product}: ${ref[0]} / ${ref[1]}`);
+      return true;
+    });
     return row;
   });
 
@@ -479,7 +547,7 @@ function generateRoster(rawConfig, options = {}) {
     `const SERVICES = [\n${body}\n];\n` +
     (hasSyncMeta ? `const ORRERY_SYNC = ${JSON.stringify(syncPayload, null, 2)};\n` : "");
 
-  return { services, sources, layout: layoutResult, syncPayload, code };
+  return { services, sources, layout: layoutResult, syncPayload, code, warnings };
 }
 
 /**
@@ -628,6 +696,44 @@ function readTailscaleFromCli() {
   return JSON.parse(out);
 }
 
+function writeAtomic(filePath, text) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, text, { mode: 0o644 });
+  fs.renameSync(tmp, filePath);
+}
+
+function findReplacedInput(configPath, rootDir) {
+  let config = {};
+  try {
+    config = normalizeConfig(JSON.parse(fs.readFileSync(configPath, "utf8")));
+  } catch {
+    config = {};
+  }
+  const composePaths = (config.composeFiles || []).map(entry =>
+    typeof entry === "string" ? entry : entry.path
+  );
+  const inputs = [
+    __filename,
+    configPath,
+    config.composeInclude,
+    ...composePaths,
+    config.dynamicTraefikFile,
+    config.gatusFile,
+  ]
+    .filter(Boolean)
+    .map(file => (path.isAbsolute(file) ? file : path.join(rootDir, file)));
+
+  for (const file of inputs) {
+    try {
+      if (fs.statSync(file).nlink === 0) return file;
+    } catch {
+      // Missing files are surfaced as warnings by generateRoster().
+    }
+  }
+  return null;
+}
+
 function syncOnce(options) {
   const configPath = path.resolve(options.config);
   const rawConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -638,26 +744,38 @@ function syncOnce(options) {
     root: rootDir,
     fleetPath: options.fleetPath,
     solveFleet: Boolean(options.solveFleet),
+    tolerant: options.tolerant,
   });
 
   const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8") : "";
   if (options.check) {
+    for (const warning of result.warnings) console.error(`warning: ${warning}`);
     if (current !== result.code) {
       console.error(`${path.relative(process.cwd(), outputPath)} is stale; run: orrery sync`);
-      return { ok: false, stale: true, count: result.services.length };
+      return { ok: false, stale: true, count: result.services.length, warnings: result.warnings };
+    }
+    if (result.warnings.length) {
+      return { ok: false, stale: false, count: result.services.length, warnings: result.warnings };
     }
     console.log(`Orrery roster is current (${result.services.length} products)`);
-    return { ok: true, stale: false, count: result.services.length };
+    return { ok: true, stale: false, count: result.services.length, warnings: result.warnings };
   }
 
-  if (current !== result.code) {
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    const tmp = `${outputPath}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, result.code, { mode: 0o644 });
-    fs.renameSync(tmp, outputPath);
+  const changed = current !== result.code;
+  if (changed) {
+    writeAtomic(outputPath, result.code);
     console.log(`Orrery roster synced: ${result.services.length} products → ${path.relative(process.cwd(), outputPath)}`);
   }
-  return { ok: true, changed: current !== result.code, count: result.services.length, result };
+  if (options.statusPath) {
+    const payload = {
+      ok: true,
+      products: result.services.length,
+      warnings: result.warnings,
+      checkedAt: new Date().toISOString(),
+    };
+    writeAtomic(path.resolve(options.statusPath), JSON.stringify(payload) + "\n");
+  }
+  return { ok: true, changed, count: result.services.length, warnings: result.warnings, result };
 }
 
 function touchHeartbeat(heartbeatPath) {
@@ -673,6 +791,7 @@ function cli(argv = process.argv.slice(2)) {
   };
   const watch = argv.includes("--watch");
   const check = argv.includes("--check");
+  const tolerantFlag = argv.includes("--tolerant");
   const solveFleet = argv.includes("--solve-layout");
   const intervalSec = Math.max(5, Number(arg("--interval") || 30));
 
@@ -685,38 +804,89 @@ function cli(argv = process.argv.slice(2)) {
   const rootDir = path.resolve(arg("--root") || path.dirname(configPath));
   const outputPath = path.resolve(arg("--output") || path.join(projectRoot, "src", "services.generated.js"));
   const fleetPath = arg("--fleet") ? path.resolve(arg("--fleet")) : path.join(projectRoot, "src", "fleet.js");
+  const explicitStatus = arg("--status") || null;
+  const statusPath = explicitStatus
+    ? path.resolve(explicitStatus)
+    : (watch ? path.join(path.dirname(outputPath), "sync-status.json") : null);
   const explicitHeartbeat = arg("--heartbeat") || process.env.ORRERY_HEARTBEAT || null;
   const heartbeatPath = explicitHeartbeat
     ? path.resolve(explicitHeartbeat)
     : (watch ? path.join(os.tmpdir(), ".orrery-sync-heartbeat") : null);
 
-  const res = syncOnce({ config: configPath, root: rootDir, output: outputPath, fleetPath, check, solveFleet });
-  if (check && !res.ok) process.exit(1);
-  if (!check && heartbeatPath) touchHeartbeat(heartbeatPath);
-
-  if (watch) {
-    setInterval(() => {
-      try {
-        syncOnce({ config: configPath, root: rootDir, output: outputPath, fleetPath, check: false, solveFleet });
-        if (heartbeatPath) touchHeartbeat(heartbeatPath);
-      } catch (err) {
-        console.error(err.stack || err.message);
-        process.exit(1);
-      }
-    }, intervalSec * 1000);
+  if (!watch) {
+    const res = syncOnce({
+      config: configPath,
+      root: rootDir,
+      output: outputPath,
+      fleetPath,
+      statusPath,
+      check,
+      solveFleet,
+      tolerant: tolerantFlag ? true : undefined,
+    });
+    if (check && !res.ok) process.exit(1);
+    if (!check) {
+      for (const warning of res.warnings || []) console.error(`warning: ${warning}`);
+      if (heartbeatPath) touchHeartbeat(heartbeatPath);
+    }
+    return;
   }
+
+  let lastLogged = null;
+  const logOnce = message => {
+    if (message === lastLogged) return;
+    lastLogged = message;
+    if (message) console.error(message);
+  };
+
+  const cycle = () => {
+    const replaced = findReplacedInput(configPath, rootDir);
+    if (replaced) {
+      console.log(`${replaced} was replaced on the host; exiting cleanly so the container remounts current files`);
+      process.exit(0);
+    }
+    try {
+      const res = syncOnce({
+        config: configPath,
+        root: rootDir,
+        output: outputPath,
+        fleetPath,
+        statusPath,
+        check: false,
+        solveFleet,
+        tolerant: true,
+      });
+      logOnce(res.warnings.length ? `roster warnings:\n  ${res.warnings.join("\n  ")}` : null);
+      if (heartbeatPath) touchHeartbeat(heartbeatPath);
+    } catch (err) {
+      // Keep serving the last good roster; sync-status.json records the error.
+      const errorMessage = err && err.message ? err.message : String(err);
+      if (statusPath) {
+        writeAtomic(
+          statusPath,
+          JSON.stringify({ ok: false, error: errorMessage, warnings: [], checkedAt: new Date().toISOString() }) + "\n"
+        );
+      }
+      logOnce(err && err.stack ? err.stack : errorMessage);
+    }
+  };
+
+  cycle();
+  setInterval(cycle, intervalSec * 1000);
 }
 
 if (require.main === module) cli();
 
 module.exports = {
   parseComposeServices,
+  parseComposeIncludes,
   parseDynamicRouters,
   parseGatusEndpoints,
   normalizeConfig,
   generateRoster,
   importTailscale,
   readTailscaleFromCli,
+  findReplacedInput,
   syncOnce,
   touchHeartbeat,
   cli,
